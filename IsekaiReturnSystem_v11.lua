@@ -100,13 +100,13 @@ local CONFIG = {
 	DuplicateDistance = 0.75,
 	MaxLift = 8,
 	LiftStep = 0.5,
-	WalkMaxTime = 120, -- batas waktu berjalan sebelum teleport cadangan dipertimbangkan
-	WalkHardMax = 150, -- batas mutlak (jika di 120 dtk masih dekat & terus bergerak, diberi tambahan waktu)
+	WalkMaxTime = 10, -- batas waktu berjalan sebelum teleport cadangan dipertimbangkan
+	WalkHardMax = 10, -- batas mutlak (jika di 120 dtk masih dekat & terus bergerak, diberi tambahan waktu)
 	FarDistance = 20, -- "benar-benar jauh" saat batas waktu habis (stud)
 	StuckConfirm = 3, -- detik tidak bergeser = dianggap nyangkut saat batas waktu habis
 	ArriveDistance = 3,
 	SpeedMin = 30,
-	SpeedMax = 130,
+	SpeedMax = 300,
 	SpeedDefault = 100,
 	DelayMax = 30,
 	DelayDefault = 3,
@@ -178,10 +178,10 @@ local KIND_COLOR = {
 }
 
 local KIND_GLYPH = {
-	success = "✓",
-	info = "i",
-	warning = "!",
-	error = "✕",
+	success = "✅",
+	info = "ℹ️",
+	warning = "‼️",
+	error = "❌",
 }
 
 -- Kategori Find. Pencocokan memakai potongan kata pada nama objek (GoldCoin -> "gold", "coin").
