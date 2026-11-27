@@ -1,0 +1,12115 @@
+--[[
+	ISEKAI / AUTONOMOUS SYSTEM  v13.1   (sebelumnya: ISEKAI / RETURN SYSTEM)
+	Navigation • Recovery • Session Control
+
+	Jenis   : LocalScript (client). Jalankan di executor ATAU taruh di StarterPlayerScripts.
+	Fitur   : Save multi-slot (CFrame), Return, Delete (konfirmasi), persistence file JSON,
+	          Auto Return (memantau posisi: karakter bergeser sedikit saja -> otomatis kembali),
+	          Anti-AFK (tekan keybind berulang tiap interval 1-19 menit),
+	          FIND: cari item yang bisa diambil (Coin / Gold / Key / Gem / Chest / Orb), ESP, filter jenis, Loop Find,
+	          interaksi/keybind per kategori, lompat, berenang, teleport berjarak, rute berurutan (terdekat dulu),
+	          UI glass gelap, intro 4 detik, toast notifikasi, minimize/close, Advanced Autoexecute + Anti-Stuck,
+		  Auto Rejoin saat target habis/gagal, timer rejoin manual, Audio Footstep Assist. Log/error dicetak ke console executor (bukan di UI).
+
+	Logika berjalan (Return & Find):
+	  - Jika karakter sedang duduk, otomatis berdiri dulu (Sit=false / lepas SeatWeld; TIDAK meloncat).
+	  - Rute memakai PathfindingService; jika terhalang, rute dihitung ulang dengan parameter lain,
+	    mencoba menyamping/memutar lewat arah yang terbuka, lalu mencoba rute memutar (detour).
+	  - Return: teleport HANYA cadangan setelah batas waktu berjalan habis (slider + toggle di tab Return, bawaan 120 detik).
+
+	Baru di v9:
+	  - Gerak Natural (Advanced): lookahead memotong tikungan, berkelok serong tipis, kecepatan bervariasi, loncat kecil acak.
+	  - Pemulihan stuck bertahap (Return & Find) SEBELUM batas waktu: spam loncat -> menyamping -> rute ulang -> mundur -> memutar.
+	    Perbaikan bug: loncat di tempat tidak lagi mereset penghitung "tidak bergeser" (hanya perpindahan datar yang dihitung).
+	  - Find selalu memilih item TERDEKAT dari posisi sekarang (jalan maupun mode teleport).
+	  - Scan ulang setelah tiap item (toggle): item yang diambil pemain lain dibuang, item baru ikut, lalu pilih terdekat lagi.
+	    Item yang gagal diambil dicatat dan tidak dikejar ulang di sesi yang sama.
+
+	v13.1: Emote sapaan diperbaiki: karakter berhenti dulu (emote bawaan hanya jalan saat berdiri, dan jalan NPC tadinya bentrok), lalu dicoba
+	       Humanoid:PlayEmote (nama emote dicocokkan dengan emote yang terpasang di avatar, tanpa peduli huruf besar/kecil) -> bindable Animate ->
+	       memutar animasinya langsung lewat Animator. Bila gagal dipakai Wave, dan alasan gagal + diagnosis (rig, emote terpasang) masuk log.
+	       Tombol "Tes emote sekarang" + kotak "Emote lain" (nama persis di roda emote). Menoleh: selama menyapa karakter TERUS menoleh ke pemain
+	       yang disapa (tiap frame) sampai pesan terkirim, lalu menoleh ke pemain antre berikutnya atau kembali ke arah semula / arah Return.
+	v13.0: Nama baru "Autonomous System" (kunci penyimpanan lama tetap dipakai, data & posisi lama tidak hilang).
+	       Sapa: daftar pesan (tambah/hapus, mode Acak/Berurutan), deteksi spam (Floodchecked) / pesan jadi "####" -> jeda 20 dtk lalu kembali
+	       ke "Jeda antar sapaan", emote sapaan (Hello / Wave / dll), daftar abaikan + lewati teman. NPC: visual jarak stud (cincin + label,
+	       bisa dimatikan), kembali ke pos awal (arah & kamera seperti Return) bila 1-10 menit tidak menyapa, auto-save + lanjut otomatis
+	       setelah rejoin. Return: Save kini menyimpan juga jarak zoom, FOV, dan mode kamera (selain arah kamera) dan memulihkannya.
+	       Timer rejoin manual kini BERULANG: tiap rejoin dihitung ulang dari awal (seperti Anti-AFK) sampai Stop Timer ditekan.
+	v12.5: Tab NPC baru. Mode NPC: karakter berperilaku seperti NPC (Wander di sekitar pusat / Patrol antar slot / Penjaga di pos) dengan
+	       jeda diam acak + menoleh, tanpa teleport cadangan, berhenti bila kamu menggerakkan karakter. Sapa pemain dekat: bila ada pemain
+	       dalam jarak tertentu, karakter mengetik di chat "Selamat datang {nama}" (display name atau username), SEKALI per pemain sampai dia
+	       rejoin; ada jarak, waktu dekat, jeda antar sapaan, pesan bervariasi, TextChatService + chat lama.
+	v12.4: "Kunci server sama" (bawaan ON; tab Server > Rejoin & Hop dan Advanced > Auto Rejoin): SEMUA rejoin (Rejoin Now, timer manual,
+	       Auto Rejoin Find, auto reconnect, stall, ping, batas sesi) kembali ke server (JobId) yang sama dan tidak lagi jatuh ke server lain
+	       saat server sama gagal; aksi Hop otomatis diganti rejoin server sama. Gagal sementara dicoba ulang maks. 3x (jeda 4 dtk), server yang
+	       sudah ditutup = berhenti dan tetap di server ini. Quick Join / Join Terpilih tetap pindah server (pilihan eksplisit).
+	v12.3: Anti-Sit diperkuat terhadap paksa-duduk pemain lain (mis. bug grobak):
+	       (1) remote bernama sit/seat/duduk/kursi/chair/bangku (+ kata tambahan di Advanced) dimatikan di client lewat getconnections;
+	       (2) reaksi instan berbasis event (Humanoid.SeatPart/Sit/Seated + SeatWeld baru), bukan hanya polling 0,35 dtk;
+	       (3) state Seated dimatikan; semua weld ke kursi dilepas lewat GetJoints; percobaan awal per-frame.
+	       Toggle + kotak kata tambahan baru di Advanced > Anti-Sit. Server yang terus menyambung ulang tetap tidak bisa dicegah penuh dari client.
+
+	v12.1: memperbaiki error 5006 "Out of local registers ... exceeded limit 200" (script dibagi dua fungsi; isi tidak berubah).
+	       Anti-Stuck: deteksi "tertanam" kini memakai bentuk benda sebenarnya (GetPartsInPart), bukan bounding box; harus terbaca terus-menerus
+	       (EmbedConfirmSeconds) dan hampir tak bergeser sebelum teleport keluar, jadi dekat / di atas batu tidak lagi memicu.
+	       Server: hop ulang setelah teleport gagal tidak lagi terblokir penjaga 45 dtk; auto reconnect batal bila pesan putus sudah hilang.
+	       Anti-Sit: daftar kursi memakai kunci lemah (tidak bocor); Setor menunggu perjalanan Find/Return selesai dulu.
+
+	Baru di v12 (belum pernah dijalankan di Roblox oleh penulisnya; uji dulu di akun/server cadangan):
+	  - Perbaikan: deteksi halangan loncat dari HumanoidRootPart (bukan kepala); mimic tidak lagi berputar / maju-mundur
+		(serong tipis & hanya jauh dari waypoint, level pemulihan tidak reset karena bergeser sendiri, waypoint tidak dikejar mundur);
+		karakter tertanam di batu/dinding/tanah dikeluarkan lewat teleport ke titik bebas terdekat; rejoin yang macet dibuka lagi setelah 45 dtk.
+	  - Anti-Sit: Seat/VehicleSeat (+ prompt Sit/Duduk) dimatikan lokal, tanpa loncat.
+	  - Slider + toggle teleport otomatis di tab Return dan Find.
+	  - Tab Server: Mode server (public/private), auto reconnect saat internet putus, rejoin/hop/server browser/quick join,
+		ping monitor, stall watchdog, batas sesi.
+	  - Tab Tools: statistik, webhook Discord, mode hemat, hotkey, tema, log file, preset (ekspor/impor), cek update,
+		Patrol, Setor otomatis, aksi terjadwal. Find: prioritas, blacklist, ESP tracer / jarak maks / penghitung.
+
+	UI (v11): empat tab -> Return, Find, AFK, Advanced. Tab Logs dihapus: semua log/error masuk ke console executor (print/warn). Advanced berisi Autoexecute, Anti-Stuck, gerak natural/audio langkah, serta Auto/Manual Rejoin.
+
+	Logika Find (v8):
+	  1. Scan    : memindai Workspace; hasil dipisah per kategori, JENIS objek (Part / Model / Tool) dan
+	               PEMICU ambil (Prompt / Click / Touch / Tanpa pemicu), lengkap dengan jumlahnya di daftar hasil.
+	  2. Item    : secara default hanya objek yang BISA DIAMBIL (punya ProximityPrompt, ClickDetector,
+	               TouchInterest atau Tool). Objek dekorasi bernama "Gold" tidak ikut. Chip "Tanpa pemicu"
+	               menyertakan objek yang hanya cocok nama.
+	  3. ESP     : toggle ON/OFF menandai posisi item (nama + jarak) dan memindai ulang berkala.
+	  4. Filter  : "Hindari Air" / "Hindari Bahaya" membuang target di air / dekat lava, kill brick, jurang.
+	  5. Walk    : berjalan berurutan dari target terdekat; loncat otomatis (halangan rendah, Coin/Gold tinggi).
+	  6. Teleport: TIDAK langsung ke item. Karakter dipindah ke titik beberapa stud dari item (jarak bisa diatur),
+	               lalu berjalan / loncat / berenang mendekat dan bolak-balik melewati item sampai terambil.
+	  7. Air     : bila item di air, karakter berenang 3D ke arah item (naik/turun), bukan hanyut mengapung.
+	  8. Stuck   : tersangkut / tidak terjangkau -> teleport berjarak lebih dekat (maks 2x). Teleport langsung
+	               ke item hanya cadangan paling akhir.
+	  Menekan tombol gerak (WASD/panah) atau tombol Stop membatalkan Find.
+
+	Persistence: memakai writefile/readfile/isfile/makefolder milik executor bila tersedia. Autoexecute membutuhkan URL raw script dan queue_on_teleport dari executor bila ingin berlanjut lintas teleport.
+	Semua pengaturan (slot, slot terpilih, Auto Return, kecepatan, jeda, jarak deteksi,
+	Anti-AFK on/off, keybind, interval, pengaturan Find) disimpan ke file dan dipulihkan saat script
+	dijalankan lagi. Tanpa API itu, data hanya hidup selama sesi (script tidak berpura-pura menyimpan).
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local VirtualUser = game:GetService("VirtualUser")
+local Workspace = game:GetService("Workspace")
+local PathfindingService = game:GetService("PathfindingService")
+local TeleportService = game:GetService("TeleportService")
+local GuiService = game:GetService("GuiService")
+local PhysicsService = game:GetService("PhysicsService")
+local StatsService = game:GetService("Stats")
+local CoreGui = nil
+pcall(function()
+	CoreGui = game:GetService("CoreGui")
+end)
+
+local player = Players.LocalPlayer
+if not player then
+	return
+end
+
+local globalEnv = (type(getgenv) == "function" and getgenv()) or _G
+local INSTANCE_KEY = "__IsekaiReturnSystem"
+
+-- Hanya satu instance: tutup instance lama (jika ada) sebelum mulai.
+local previous = globalEnv[INSTANCE_KEY]
+if type(previous) == "table" and type(previous.Cleanup) == "function" then
+	pcall(previous.Cleanup)
+end
+
+--------------------------------------------------------------------------------
+-- CONFIG & THEME
+--------------------------------------------------------------------------------
+
+local CONFIG = {
+	Title = "ISEKAI / AUTONOMOUS SYSTEM",
+	ScriptRevision = 14, -- dibandingkan dengan salinan di URL raw (Cek Update)
+	Subtitle = "Navigation • Recovery • Session Control",
+	IntroTitle = "ISID Autonomous System",
+	Credit = "Developed by Denis Cepaka & Claude",
+	MaxSlots = 20,
+	MaxNameLength = 24,
+	DataFolder = "IsekaiReturnSystem",
+	DataFile = "IsekaiReturnSystem/positions.json",
+	DataVersion = 5,
+	AutoSaveInterval = 15, -- detik; simpan ulang berkala bila ada perubahan
+	IntroDuration = 4,
+	IntroFadeOut = 0.6,
+	AfkMinMinutes = 1,
+	AfkMaxMinutes = 19,
+	DefaultAfkMinutes = 15,
+	DefaultKey = "Space", -- tombol yang DITEKAN oleh Anti-AFK (bukan hotkey toggle)
+	ToastDuration = 2.8,
+	MaxToasts = 3,
+	ToastHeight = 54,
+	DuplicateDistance = 0.75,
+	MaxLift = 8,
+	LiftStep = 0.5,
+	WalkMaxTime = 120, -- batas waktu berjalan sebelum teleport cadangan dipertimbangkan
+	WalkHardMax = 150, -- batas mutlak (jika di 120 dtk masih dekat & terus bergerak, diberi tambahan waktu)
+	FarDistance = 20, -- "benar-benar jauh" saat batas waktu habis (stud)
+	StuckConfirm = 3, -- detik tidak bergeser = dianggap nyangkut saat batas waktu habis
+	ArriveDistance = 3,
+	SpeedMin = 30,
+	SpeedMax = 200,
+	SpeedDefault = 100,
+	DelayMax = 30,
+	DelayDefault = 3,
+	TriggerMin = 1.5, -- jarak geser (stud) yang memicu Auto Return
+	TriggerMax = 20,
+	TriggerDefault = 2.5,
+	WatchInterval = 0.25,
+
+	-- FIND
+	FindMaxResults = 400, -- batas jumlah target hasil scan
+	FindMaxSize = 40, -- objek lebih besar dari ini (stud) dianggap bagian peta, bukan item
+	FindMaxTransparency = 0.98, -- objek (hampir) transparan penuh dianggap tidak ada / sudah diambil
+	FindCustomMaxLength = 80, -- panjang maksimal teks kata kunci manual
+	FindMaxKeywords = 8,
+	FindArriveDistance = 3.5, -- jarak datar untuk mulai pendekatan akhir (stud)
+	FindFinalTime = 3, -- batas waktu pendekatan akhir sebelum teleport cadangan
+	FindStuckTime = 8, -- detik tidak bergeser (setelah pemulihan: spam loncat, menyamping, rute ulang, mundur, memutar) -> baru dianggap stuck
+	FindNoProgressTime = 14, -- detik bergerak tapi tidak mendekat (jalur lain dicoba di detik 5 & 9) -> baru dianggap stuck
+	FindTargetTimeout = 15, -- batas maksimal untuk memastikan target berhasil diambil
+	FindCollectTimeout = 15, -- tunggu target hilang/terambil sebelum dilewati
+	FindFailedCoinRejoinLimit = 3, -- tiga Coin/Gold gagal diambil berturut-turut memicu rejoin
+	FindFailedPickupRejoinLimit = 5, -- lima target umum gagal diambil berturut-turut memicu rejoin
+	FindEmptyRejoinScans = 3, -- saat Loop Find kosong setelah pernah mengumpulkan item, rejoin setelah scan kosong berulang
+	ManualRejoinMinMinutes = 1,
+	ManualRejoinMaxMinutes = 1440, -- maksimum 24 jam
+	FindTeleportCollectDelay = 3, -- waktu tunggu setelah teleport agar item sempat terambil
+	FindLoopDelay = 2.5, -- jeda antar-scan saat Loop Find aktif
+	FindHighItemJumpHeight = 2.5, -- Coin/Gold di atas karakter: mulai coba melompat
+	FindHighItemJumpDistance = 18, -- jangan melompat ke target tinggi yang masih terlalu jauh
+	HazardMargin = 3, -- jarak aman rute dari objek bahaya (stud)
+	HazardTargetMargin = 5, -- target lebih dekat dari ini ke objek bahaya dilewati (stud)
+	FindMaxRaw = 600, -- batas hasil mentah scan (sebelum filter jenis / pemicu)
+	FindStandoffMin = 5, -- jarak teleport minimum dari item (stud)
+	FindStandoffMax = 30,
+	FindStandoffDefault = 14,
+	FindStandoffRetries = 2, -- berapa kali teleport berjarak ulang (makin dekat) sebelum cadangan terakhir
+	FindRetryTimeout = 8, -- batas waktu percobaan ulang setelah teleport berjarak
+	FindSweepTime = 4, -- detik bolak-balik melewati item bila sudah dekat tapi belum terambil
+	EspRescanInterval = 6, -- jeda scan ulang saat ESP aktif (detik)
+	AntiStuckPollInterval = 0.35, -- interval pemantauan karakter global
+	AntiStuckMoveTimeout = 4, -- input gerak tanpa perpindahan selama ini memicu recovery
+	EmbedConfirmSeconds = 1.6, -- karakter harus terbaca TERTANAM terus-menerus (dan hampir tak bergeser) selama ini sebelum diteleport keluar
+	AutoExecuteUrlMaxLength = 512,
+	ResultListMax = 60, -- baris maksimal di daftar hasil
+	PriorityStep = 60, -- bonus jarak (stud) per peringkat prioritas kategori Find
+	WebhookMinInterval = 2.5, -- jeda minimum antar-pengiriman webhook (detik)
+	HopHistoryMax = 25, -- jumlah JobId terakhir yang diingat agar tidak kembali ke server yang sama
+	ServerListMax = 30, -- baris maksimal di daftar server
+	NetErrorCodes = { 260, 261, 262, 266, 277, 278, 279, 282 }, -- kode error Roblox yang dianggap putus jaringan/idle
+	NetStartDelay = 6, -- jeda sebelum mulai mencoba rejoin setelah disconnect (detik)
+	NetRetryDelays = { 5, 10, 20, 30 }, -- jeda antar percobaan rejoin (detik); terakhir diulang
+	LogFile = "IsekaiReturnSystem/log.txt",
+	LogFileMaxBytes = 150000,
+	PresetsMax = 20,
+	ConsoleTag = "[Autonomous]", -- awalan log di console executor
+	ConsoleVerbose = false, -- true = info/success juga dicetak; false = hanya warning/error + startup
+}
+
+local THEME = {
+	Background = Color3.fromRGB(24, 16, 40),
+	BackgroundAlt = Color3.fromRGB(62, 28, 98),
+	Surface = Color3.fromRGB(42, 29, 66),
+	SurfaceHi = Color3.fromRGB(66, 44, 98),
+	Border = Color3.fromRGB(96, 62, 138),
+	Accent = Color3.fromRGB(214, 64, 206),
+	AccentDark = Color3.fromRGB(122, 52, 196),
+	Text = Color3.fromRGB(246, 242, 252),
+	Muted = Color3.fromRGB(170, 158, 192),
+	Success = Color3.fromRGB(88, 214, 141),
+	Info = Color3.fromRGB(110, 168, 255),
+	Warning = Color3.fromRGB(255, 190, 72),
+	Error = Color3.fromRGB(255, 92, 112),
+}
+
+local KIND_COLOR = {
+	success = THEME.Success,
+	info = THEME.Info,
+	warning = THEME.Warning,
+	error = THEME.Error,
+}
+
+local KIND_GLYPH = {
+	success = "✓",
+	info = "i",
+	warning = "!",
+	error = "✕",
+}
+
+-- Kategori Find. Pencocokan memakai potongan kata pada nama objek (GoldCoin -> "gold", "coin").
+local FIND_CATEGORIES = {
+	{ id = "coin", label = "Coin", words = { "coin", "koin", "cash", "money" } },
+	{ id = "gold", label = "Gold", words = { "gold", "emas", "ingot", "nugget" } },
+	{ id = "key", label = "Key", words = { "key", "kunci" } },
+	{ id = "gem", label = "Gem", words = { "gem", "diamond", "crystal", "jewel", "ruby" } },
+	{ id = "chest", label = "Chest", words = { "chest", "crate", "treasure", "peti" } },
+	{ id = "orb", label = "Orb", words = { "orb", "star", "token", "pickup", "collectible", "collectable" } },
+}
+
+-- Jenis objek dan cara item diambil (dipakai sebagai filter + pemisah jumlah di daftar hasil).
+local FIND_KINDS = {
+	{ id = "part", label = "Part" },
+	{ id = "model", label = "Model" },
+	{ id = "tool", label = "Tool" },
+}
+local FIND_TRIGGERS = {
+	{ id = "prompt", label = "Prompt" },
+	{ id = "click", label = "Click" },
+	{ id = "touch", label = "Touch" },
+	{ id = "plain", label = "Tanpa pemicu" },
+}
+
+local ESP_COLORS = {
+	coin = Color3.fromRGB(255, 214, 64),
+	gold = Color3.fromRGB(255, 170, 40),
+	key = Color3.fromRGB(120, 210, 255),
+	gem = Color3.fromRGB(120, 255, 200),
+	chest = Color3.fromRGB(255, 140, 90),
+	orb = Color3.fromRGB(200, 140, 255),
+	custom = Color3.fromRGB(255, 255, 255),
+}
+
+local TABS = {
+	{ id = "return", label = "Return" },
+	{ id = "find", label = "Find" },
+	{ id = "afk", label = "AFK" },
+	{ id = "npc", label = "NPC" },
+	{ id = "advanced", label = "Advanced" },
+	{ id = "server", label = "Server" },
+	{ id = "tools", label = "Tools" },
+}
+
+-- Nama objek yang dianggap berbahaya (dicocokkan sebagai kata utuh).
+local HAZARD_WORDS = {
+	"lava", "magma", "kill", "killbrick", "killpart", "death", "deathbrick", "damage", "hurt",
+	"acid", "poison", "toxic", "spike", "laser", "electric", "shock", "hazard", "danger", "void",
+}
+
+--------------------------------------------------------------------------------
+-- STATE & TRACKERS
+--------------------------------------------------------------------------------
+
+local state = {
+	closed = false,
+	uiReady = false,
+	minimized = false,
+	tab = "return",
+	visToken = 0,
+	slots = {}, -- semua slot (semua place); yang tampil hanya milik place ini
+	selectedId = nil,
+	autoReturn = false,
+	walk = nil,
+	walkSpeedPct = CONFIG.SpeedDefault,
+	autoDelay = CONFIG.DelayDefault,
+	autoTrigger = CONFIG.TriggerDefault,
+	autoPauseUntil = 0,
+	busy = false,
+	moveToken = 0,
+	capturingKey = false,
+	capturingFindKey = nil,
+	lastPersistError = 0,
+	lastEncoded = nil,
+	statusText = "Siap.",
+	statusKind = "info",
+	storage = { available = false, mode = "Session only", lastSavedAt = 0 },
+	advanced = {
+		autoExecuteEnabled = globalEnv.__IsekaiReturnSystemAutoExecuteEnabled == true,
+		scriptUrl = type(globalEnv.__IsekaiReturnSystemAutoExecuteURL) == "string" and globalEnv.__IsekaiReturnSystemAutoExecuteURL or "",
+		antiStuckEnabled = true,
+		naturalMove = true, -- gerak natural (lookahead, serong, hop acak, variasi kecepatan)
+		footstepAssist = true, -- bantu putar Sound "Running" bawaan bila game memilikinya
+	},
+	rejoin = {
+		autoWhenEmpty = true, -- rejoin jika target habis setelah pernah berhasil mengumpulkan item
+		emptyScanStreak = 0,
+		sessionCollected = false,
+		manualMinutes = 30,
+		manualActive = false,
+		manualEndsAt = 0,
+		manualToken = 0,
+		manualRepeat = false, -- v13: timer dihitung ulang setiap rejoin sampai dihentikan manual (disimpan)
+	},
+	afk = {
+		active = false,
+		resume = false, -- Anti-AFK aktif saat terakhir disimpan -> dinyalakan lagi saat load
+		endsAt = 0,
+		minutes = CONFIG.DefaultAfkMinutes,
+		keyCode = Enum.KeyCode[CONFIG.DefaultKey],
+		token = 0,
+		vuWarned = false,
+	},
+	find = {
+		running = false,
+		scanning = false,
+		token = 0,
+		categories = { coin = true, gold = true, key = true, gem = false, chest = false, orb = false },
+		custom = "", -- kata kunci manual, dipisah koma
+		loopEnabled = false,
+		mode = "walk", -- "walk" atau "teleport" (teleport berjarak, bukan langsung ke item)
+		standoff = CONFIG.FindStandoffDefault, -- jarak teleport dari item (stud)
+		espEnabled = false,
+		kinds = { part = true, model = true, tool = true },
+		triggers = { prompt = true, click = true, touch = true, plain = false }, -- plain=false: hanya item yang bisa diambil
+		raw = {}, -- hasil mentah scan (sebelum filter jenis / pemicu)
+		kindCounts = { part = 0, model = 0, tool = 0 },
+		trigCounts = { prompt = 0, click = 0, touch = 0, plain = 0 },
+		scanned = false,
+		jumpHighCoinGold = true,
+		interactEnabled = { coin = false, gold = false, key = false, gem = false, chest = false, orb = false },
+		interactKeys = { coin = Enum.KeyCode.E, gold = Enum.KeyCode.E, key = Enum.KeyCode.E, gem = Enum.KeyCode.E, chest = Enum.KeyCode.E, orb = Enum.KeyCode.E },
+		avoidWater = false, -- default OFF: item di air didekati dengan berenang
+		avoidHazard = true,
+		rescanEachItem = true, -- scan ulang setelah tiap item (buang yang diambil pemain lain)
+		failed = {},
+		speedPct = CONFIG.SpeedDefault,
+		results = {},
+		hazards = {},
+		matchers = {},
+		counts = {},
+		truncated = false,
+		total = 0,
+		done = 0,
+		collected = 0,
+		visited = 0,
+		gone = 0,
+		teleports = 0,
+		failedCoinSkips = 0,
+		failedPickupStreak = 0,
+		statusText = "Belum dipindai. Tekan Scan untuk menghitung target.",
+	},
+}
+
+local connections = {}
+local tasks = {}
+local activeTweens = {}
+local pendingNotices = {}
+local ui = {}
+
+local toastQueue = {}
+local toastActive = 0
+local toastMessages = {}
+local toastCounter = 0
+
+-- Forward declarations
+local showNotification
+local refreshUI
+local refreshStatus
+local refreshFindUI
+local rebuildESP
+local refreshResultList
+local persistSavedData
+local moveToSavedSpot
+local toggleAntiAFK
+local toggleAutoReturn
+local startFind
+local stopFind
+local cleanup
+local pressKey
+local nearHazard
+local cleanupHooks = {}
+local startServerModule
+local startToolsHook
+local startAutomationHook
+
+--------------------------------------------------------------------------------
+-- UTILITIES
+--------------------------------------------------------------------------------
+
+local connectionPruneAt = 300
+local function connect(signal, handler)
+	local connection = signal:Connect(function(...)
+		local ok, err = xpcall(handler, debug.traceback, ...)
+		if not ok and not state.closed and ui.addLog then
+			ui.addLog("Error pada event handler: " .. tostring(err), "error", "Runtime")
+		end
+	end)
+	table.insert(connections, connection)
+	-- Baris daftar yang dibuat ulang / listener yang sudah diputus tidak perlu disimpan selamanya.
+	if #connections > connectionPruneAt then
+		for index = #connections, 1, -1 do
+			if not connections[index].Connected then
+				table.remove(connections, index)
+			end
+		end
+		connectionPruneAt = math.max(300, #connections * 2)
+	end
+	return connection
+end
+
+local function spawnTask(fn, ...)
+	for i = #tasks, 1, -1 do
+		if coroutine.status(tasks[i]) == "dead" then
+			table.remove(tasks, i)
+		end
+	end
+	local thread = task.spawn(function(...)
+		local ok, err = xpcall(fn, debug.traceback, ...)
+		if not ok and not state.closed and ui.addLog then
+			ui.addLog("Error pada task: " .. tostring(err), "error", "Runtime")
+		end
+	end, ...)
+	table.insert(tasks, thread)
+	return thread
+end
+
+local function tween(instance, duration, props, style, direction)
+	if state.closed or not instance or not instance.Parent then
+		return nil
+	end
+	local info = TweenInfo.new(duration, style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out)
+	local created = TweenService:Create(instance, info, props)
+	activeTweens[created] = true
+	created.Completed:Once(function()
+		activeTweens[created] = nil
+	end)
+	created:Play()
+	return created
+end
+
+local function new(className, props, children)
+	local instance = Instance.new(className)
+	if instance:IsA("GuiObject") then
+		instance.BorderSizePixel = 0
+	end
+	local parent = nil
+	for key, value in pairs(props or {}) do
+		if key == "Parent" then
+			parent = value
+		else
+			instance[key] = value
+		end
+	end
+	for _, child in ipairs(children or {}) do
+		child.Parent = instance
+	end
+	if parent then
+		instance.Parent = parent
+	end
+	return instance
+end
+
+local function corner(radius)
+	return new("UICorner", { CornerRadius = UDim.new(0, radius) })
+end
+
+local function stroke(color, thickness, transparency)
+	return new("UIStroke", {
+		Color = color,
+		Thickness = thickness,
+		Transparency = transparency,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	})
+end
+
+local function padding(left, top, right, bottom)
+	return new("UIPadding", {
+		PaddingLeft = UDim.new(0, left),
+		PaddingTop = UDim.new(0, top),
+		PaddingRight = UDim.new(0, right),
+		PaddingBottom = UDim.new(0, bottom),
+	})
+end
+
+local function isFinite(value)
+	return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
+end
+
+local function formatTime(seconds)
+	seconds = math.max(0, math.floor(seconds))
+	return string.format("%02d:%02d", math.floor(seconds / 60), seconds % 60)
+end
+
+local function resolveKeyCode(name)
+	if type(name) ~= "string" then
+		return nil
+	end
+	local ok, keyCode = pcall(function()
+		return Enum.KeyCode[name]
+	end)
+	if ok and keyCode and keyCode ~= Enum.KeyCode.Unknown then
+		return keyCode
+	end
+	return nil
+end
+
+-- Membersihkan teks kata kunci manual: buang karakter kontrol, rapikan spasi, batasi panjang.
+local function sanitizeKeywords(raw)
+	local text = tostring(raw or ""):gsub("%c", " ")
+	text = text:match("^%s*(.-)%s*$")
+	local length = utf8.len(text)
+	if not length then
+		return ""
+	end
+	if length > CONFIG.FindCustomMaxLength then
+		local cut = utf8.offset(text, CONFIG.FindCustomMaxLength + 1)
+		text = text:sub(1, (cut or (#text + 1)) - 1)
+	end
+	return text
+end
+
+--------------------------------------------------------------------------------
+-- VALIDASI
+--------------------------------------------------------------------------------
+
+local function validateDuration(input)
+	local maxMessage = string.format("Interval Anti-AFK melebihi batas maksimum (%d menit).", CONFIG.AfkMaxMinutes)
+	if type(input) ~= "string" then
+		return nil, "Input tidak valid."
+	end
+	local text = input:match("^%s*(.-)%s*$")
+	if text == "" then
+		return nil, "Input tidak valid: interval tidak boleh kosong."
+	end
+	if not text:match("^%d+$") then
+		return nil, "Input tidak valid: gunakan angka bulat saja (tanpa huruf, simbol, atau desimal)."
+	end
+	if #text > 6 then
+		return nil, maxMessage
+	end
+	local minutes = tonumber(text)
+	if minutes > CONFIG.AfkMaxMinutes then
+		return nil, maxMessage
+	end
+	if minutes < CONFIG.AfkMinMinutes then
+		return nil, "Interval 0 menit tidak valid. Isi 1 atau lebih."
+	end
+	return minutes
+end
+
+local function sanitizeName(raw)
+	local text = (raw or ""):gsub("%c", " ")
+	text = text:match("^%s*(.-)%s*$")
+	text = text:gsub("%s+", " ")
+	if text == "" then
+		return ""
+	end
+	local length = utf8.len(text)
+	if not length then
+		return nil, "Nama mengandung karakter tidak valid."
+	end
+	if length > CONFIG.MaxNameLength then
+		return nil, string.format("Nama maksimal %d karakter.", CONFIG.MaxNameLength)
+	end
+	return text
+end
+
+local function deserializeCFrame(components)
+	if type(components) ~= "table" or #components ~= 12 then
+		return nil
+	end
+	for i = 1, 12 do
+		if not isFinite(components[i]) then
+			return nil
+		end
+	end
+	local cf = CFrame.new(table.unpack(components))
+	if math.abs(cf.RightVector.Magnitude - 1) > 0.01
+		or math.abs(cf.UpVector.Magnitude - 1) > 0.01
+		or math.abs(cf.LookVector.Magnitude - 1) > 0.01 then
+		return nil
+	end
+	return cf
+end
+
+--------------------------------------------------------------------------------
+-- PREFERENSI (pengaturan baru v12) + TEMA + STATISTIK + MODE SERVER
+--------------------------------------------------------------------------------
+
+-- t: boolean | number (min/max, dibulatkan) | string (max) | enum (values) | key (nama Enum.KeyCode, "" = kosong)
+local PREF_DEFS = {
+	-- Teleport otomatis (cadangan)
+	returnTpEnabled = { t = "boolean", d = true },
+	returnTpSeconds = { t = "number", d = 120, min = 10, max = 300 },
+	findTpEnabled = { t = "boolean", d = true },
+	findTpSeconds = { t = "number", d = 15, min = 3, max = 60 },
+	-- Anti-Sit
+	antiSit = { t = "boolean", d = true },
+	antiSitRemotes = { t = "boolean", d = true },
+	antiSitWords = { t = "string", d = "", max = 120 },
+	-- Server
+	serverMode = { t = "enum", d = "all", values = { "all", "public", "private" } },
+	reservedAs = { t = "enum", d = "private", values = { "public", "private" } },
+	privateLink = { t = "string", d = "", max = 300 },
+	netRejoin = { t = "boolean", d = true },
+	netTries = { t = "number", d = 8, min = 1, max = 20 },
+	rejoinTarget = { t = "enum", d = "any", values = { "same", "any", "hop" } },
+	rejoinSameLock = { t = "boolean", d = true }, -- v12.4: semua rejoin otomatis/manual selalu ke server (JobId) yang sama
+	hopMode = { t = "enum", d = "low", values = { "low", "random" } },
+	resumeAfterDeath = { t = "boolean", d = true },
+	stallOn = { t = "boolean", d = false },
+	stallMinutes = { t = "number", d = 5, min = 1, max = 60 },
+	stallStat = { t = "string", d = "", max = 40 },
+	stallAction = { t = "enum", d = "rejoin", values = { "rejoin", "hop", "notify" } },
+	pingOn = { t = "boolean", d = false },
+	pingLimit = { t = "number", d = 600, min = 150, max = 3000 },
+	pingStrikes = { t = "number", d = 6, min = 2, max = 30 },
+	pingAction = { t = "enum", d = "notify", values = { "notify", "hop" } },
+	limitOn = { t = "boolean", d = false },
+	limitMinutes = { t = "number", d = 60, min = 0, max = 720 },
+	limitItems = { t = "number", d = 200, min = 0, max = 5000 },
+	limitAction = { t = "enum", d = "stop", values = { "stop", "rejoin", "hop" } },
+	-- Setor / patrol / aksi terjadwal
+	deliverOn = { t = "boolean", d = false },
+	deliverItems = { t = "number", d = 20, min = 0, max = 500 },
+	deliverMinutes = { t = "number", d = 0, min = 0, max = 120 },
+	deliverKey = { t = "key", d = "" },
+	deliverPrompt = { t = "string", d = "", max = 40 },
+	deliverDwell = { t = "number", d = 3, min = 1, max = 30 },
+	patrolDwell = { t = "number", d = 5, min = 0, max = 120 },
+	patrolFind = { t = "boolean", d = false },
+	-- Mode NPC + Sapa pemain dekat (v12.5)
+	npcMode = { t = "enum", d = "wander", values = { "wander", "patrol", "guard" } },
+	npcRadius = { t = "number", d = 30, min = 5, max = 150 },
+	npcDwellMin = { t = "number", d = 4, min = 1, max = 60 },
+	npcDwellMax = { t = "number", d = 15, min = 1, max = 120 },
+	npcLook = { t = "boolean", d = true },
+	npcResume = { t = "boolean", d = true },
+	npcRunning = { t = "boolean", d = false }, -- penanda (bukan pengaturan): Mode NPC aktif, agar dilanjutkan setelah rejoin
+	greetOn = { t = "boolean", d = false },
+	greetDistance = { t = "number", d = 25, min = 5, max = 100 },
+	greetStay = { t = "number", d = 2, min = 0, max = 10 },
+	greetGap = { t = "number", d = 10, min = 3, max = 120 },
+	greetName = { t = "enum", d = "display", values = { "display", "username" } },
+	greetText = { t = "string", d = "Selamat datang {name}!", max = 150 }, -- LAMA (v12.5): dipindah ke greetList saat dimuat
+	greetFace = { t = "boolean", d = true },
+	-- v13.0: daftar pesan, deteksi spam, emote, abaikan, visual jarak, kembali ke pos
+	greetList = { t = "list", d = { "Selamat datang {name}!", "Halo {name}, selamat datang!", "Hai {name}! Selamat datang ya." }, maxItems = 20, itemMax = 150 },
+	greetOrder = { t = "enum", d = "random", values = { "random", "sequential" } },
+	greetSpamPause = { t = "number", d = 20, min = 5, max = 120 },
+	greetEmote = { t = "boolean", d = false },
+	greetEmoteName = { t = "enum", d = "hello", values = { "hello", "wave", "cheer", "point", "salute", "applaud", "laugh" } },
+	greetEmoteCustom = { t = "string", d = "", max = 30 }, -- v13.1: nama emote lain (persis seperti di roda emote), menggantikan pilihan di atas
+	greetSkipFriends = { t = "boolean", d = false },
+	greetIgnore = { t = "string", d = "", max = 200 },
+	npcShowRange = { t = "boolean", d = true },
+	npcHomeReturn = { t = "boolean", d = true },
+	npcHomeMin = { t = "number", d = 2, min = 1, max = 10 },
+	npcHomeMax = { t = "number", d = 5, min = 1, max = 10 },
+	npcHomeHold = { t = "number", d = 45, min = 10, max = 300 },
+	schedOn = { t = "boolean", d = false },
+	schedSeconds = { t = "number", d = 60, min = 5, max = 3600 },
+	schedKey = { t = "key", d = "" },
+	schedPrompt = { t = "string", d = "", max = 40 },
+	-- Find tambahan
+	findPriority = { t = "string", d = "", max = 80 },
+	findBlacklist = { t = "string", d = "", max = 80 },
+	-- ESP
+	espTracer = { t = "boolean", d = false },
+	espMaxDist = { t = "number", d = 0, min = 0, max = 3000 },
+	espCounter = { t = "boolean", d = true },
+	-- Hemat resource
+	ecoOn = { t = "boolean", d = false },
+	ecoFps = { t = "number", d = 15, min = 5, max = 60 },
+	ecoBlack = { t = "boolean", d = false },
+	ecoLowGfx = { t = "boolean", d = true },
+	-- Webhook
+	webhookUrl = { t = "string", d = "", max = 300 },
+	webhookOn = { t = "boolean", d = false },
+	whRejoin = { t = "boolean", d = true },
+	whStall = { t = "boolean", d = true },
+	whLimit = { t = "boolean", d = true },
+	whSummaryMin = { t = "number", d = 0, min = 0, max = 240 },
+	-- Hotkey
+	hkToggleUI = { t = "key", d = "RightControl" },
+	hkFind = { t = "key", d = "F6" },
+	hkStopAll = { t = "key", d = "F7" },
+	hkBlack = { t = "key", d = "F8" },
+	-- Tampilan / log / update
+	theme = { t = "enum", d = "Magenta", values = { "Magenta", "Biru", "Hijau", "Oranye", "Merah" } },
+	logVerbose = { t = "boolean", d = false },
+	logFile = { t = "boolean", d = false },
+	updateCheck = { t = "boolean", d = true },
+	watchdog = { t = "boolean", d = false },
+}
+
+local function sanitizePref(def, value)
+	if def.t == "boolean" then
+		if type(value) == "boolean" then
+			return value
+		end
+	elseif def.t == "number" then
+		if isFinite(value) then
+			return math.clamp(math.floor(value + 0.5), def.min, def.max)
+		end
+	elseif def.t == "string" then
+		if type(value) == "string" then
+			local text = value:gsub("%c", "")
+			text = text:match("^%s*(.-)%s*$")
+			if #text <= (def.max or 80) then
+				return text
+			end
+		end
+	elseif def.t == "enum" then
+		if table.find(def.values, value) then
+			return value
+		end
+	elseif def.t == "list" then
+		-- Daftar teks (mis. pesan sapaan): tiap butir dibersihkan, dibatasi jumlah dan panjangnya.
+		if type(value) == "table" then
+			local out = {}
+			for _, item in ipairs(value) do
+				if type(item) == "string" and #out < (def.maxItems or 20) then
+					local text = item:gsub("%c", "")
+					text = text:match("^%s*(.-)%s*$")
+					if #text > 0 and #text <= (def.itemMax or 150) then
+						table.insert(out, text)
+					end
+				end
+			end
+			return out
+		end
+	elseif def.t == "key" then
+		if value == "" then
+			return ""
+		end
+		if resolveKeyCode(value) then
+			return value
+		end
+	end
+	return nil
+end
+
+local function defaultPrefs()
+	local out = {}
+	for key, def in pairs(PREF_DEFS) do
+		if type(def.d) == "table" then
+			out[key] = table.clone(def.d)
+		else
+			out[key] = def.d
+		end
+	end
+	return out
+end
+
+state.prefs = defaultPrefs()
+
+local function loadPrefs(source)
+	if type(source) ~= "table" then
+		return
+	end
+	for key, def in pairs(PREF_DEFS) do
+		local value = sanitizePref(def, source[key])
+		if value ~= nil then
+			state.prefs[key] = value
+		end
+	end
+	-- v13: pesan sapaan lama (greetText, dipisah "|") dipindah ke daftar greetList bila daftar belum pernah disimpan.
+	if type(source.greetList) ~= "table" and type(source.greetText) == "string" and source.greetText ~= PREF_DEFS.greetText.d then
+		local migrated = {}
+		for part in (source.greetText .. "|"):gmatch("(.-)|") do
+			table.insert(migrated, part)
+		end
+		local clean = sanitizePref(PREF_DEFS.greetList, migrated)
+		if clean and #clean > 0 then
+			state.prefs.greetList = clean
+		end
+	end
+end
+
+-- Mengubah satu preferensi dengan validasi. Mengembalikan true bila nilai diterima.
+local function setPref(key, value)
+	local def = PREF_DEFS[key]
+	if not def then
+		return false
+	end
+	local clean = sanitizePref(def, value)
+	if clean == nil then
+		return false
+	end
+	state.prefs[key] = clean
+	return true
+end
+
+-- Tema warna (diterapkan SEBELUM UI dibangun; ganti tema = jalankan ulang script).
+local THEME_PRESETS = {
+	Magenta = {},
+	Biru = {
+		Background = Color3.fromRGB(14, 22, 40), BackgroundAlt = Color3.fromRGB(28, 52, 98),
+		Surface = Color3.fromRGB(26, 40, 66), SurfaceHi = Color3.fromRGB(40, 62, 98),
+		Border = Color3.fromRGB(62, 96, 138), Accent = Color3.fromRGB(64, 170, 230), AccentDark = Color3.fromRGB(52, 110, 196),
+	},
+	Hijau = {
+		Background = Color3.fromRGB(14, 34, 26), BackgroundAlt = Color3.fromRGB(28, 86, 62),
+		Surface = Color3.fromRGB(24, 56, 44), SurfaceHi = Color3.fromRGB(40, 90, 70),
+		Border = Color3.fromRGB(62, 138, 100), Accent = Color3.fromRGB(64, 214, 140), AccentDark = Color3.fromRGB(40, 150, 100),
+	},
+	Oranye = {
+		Background = Color3.fromRGB(38, 24, 14), BackgroundAlt = Color3.fromRGB(98, 58, 28),
+		Surface = Color3.fromRGB(66, 44, 29), SurfaceHi = Color3.fromRGB(98, 66, 40),
+		Border = Color3.fromRGB(138, 96, 62), Accent = Color3.fromRGB(240, 150, 50), AccentDark = Color3.fromRGB(196, 110, 40),
+	},
+	Merah = {
+		Background = Color3.fromRGB(38, 14, 18), BackgroundAlt = Color3.fromRGB(98, 28, 40),
+		Surface = Color3.fromRGB(66, 26, 32), SurfaceHi = Color3.fromRGB(98, 40, 52),
+		Border = Color3.fromRGB(138, 62, 76), Accent = Color3.fromRGB(236, 70, 90), AccentDark = Color3.fromRGB(180, 40, 60),
+	},
+}
+
+local function applyThemePreset()
+	local preset = THEME_PRESETS[state.prefs.theme]
+	if preset then
+		for key, value in pairs(preset) do
+			THEME[key] = value
+		end
+	end
+end
+
+-- Statistik sesi (disimpan ke file supaya bertahan melewati rejoin).
+state.stats = { startedAt = os.time(), collected = 0, rejoins = 0, hops = 0, stalls = 0, reconnects = 0 }
+state.server = { history = {}, list = {}, selectedJob = nil, listStatus = "Belum dimuat." }
+state.presets = {}
+state.patrol = { active = false, token = 0 }
+-- Mode NPC + Sapa pemain dekat (v12.5); logika di bagian OTOMASI, UI di buildNpcTab.
+state.npc = {
+	active = false, token = 0, status = "Nonaktif.", walking = false, center = nil, centerSlotRef = nil,
+	greeted = {}, greetedCount = 0, queue = {}, queued = {}, nearSince = {}, lastSent = -math.huge, lastName = nil,
+	failStreak = 0, pausedUntil = 0,
+}
+state.hooks = { afterItemList = {} } -- diisi modul yang didefinisikan belakangan (afterItem, webhook, dsb.)
+state.hooks.afterItem = function(ctx, cancelled, moveToken)
+	for _, fn in ipairs(state.hooks.afterItemList) do
+		local ok, verdict = pcall(fn, ctx, cancelled, moveToken)
+		if ok and verdict == "stop" then
+			return "stop"
+		end
+	end
+	return nil
+end
+state.tools = { logBuffer = {}, stopHooks = {} }
+-- Kirim kejadian ke webhook bila modul webhook sudah terpasang (aman dipanggil kapan saja).
+state.hooks.fire = function(kind, text)
+	local handler = state.hooks.webhook
+	if handler then
+		pcall(handler, kind, text)
+	end
+end
+
+local function loadStats(source)
+	if type(source) ~= "table" then
+		return
+	end
+	for _, key in ipairs({ "collected", "rejoins", "hops", "stalls", "reconnects" }) do
+		if isFinite(source[key]) and source[key] >= 0 then
+			state.stats[key] = math.floor(source[key])
+		end
+	end
+	if isFinite(source.startedAt) and source.startedAt > 0 and source.startedAt <= os.time() then
+		state.stats.startedAt = math.floor(source.startedAt)
+	end
+end
+
+local function loadHistory(list)
+	if type(list) ~= "table" then
+		return
+	end
+	for _, jobId in ipairs(list) do
+		if type(jobId) == "string" and #jobId > 0 and #jobId <= 64 and #state.server.history < CONFIG.HopHistoryMax then
+			table.insert(state.server.history, jobId)
+		end
+	end
+end
+
+local function loadPresets(list)
+	if type(list) ~= "table" then
+		return
+	end
+	for _, item in ipairs(list) do
+		if type(item) == "table" and type(item.name) == "string" and #item.name > 0 and #item.name <= CONFIG.MaxNameLength
+			and type(item.data) == "table" and #state.presets < CONFIG.PresetsMax then
+			table.insert(state.presets, { name = item.name, data = item.data })
+		end
+	end
+end
+
+-- Tipe server saat ini: "public", "private" (VIP, ada pemilik) atau "reserved" (dibuat game, tanpa pemilik).
+local function detectServerType()
+	local okId, privateId = pcall(function()
+		return game.PrivateServerId
+	end)
+	if not okId or privateId == nil or privateId == "" then
+		return "public"
+	end
+	local okOwner, owner = pcall(function()
+		return game.PrivateServerOwnerId
+	end)
+	if okOwner and type(owner) == "number" and owner ~= 0 then
+		return "private"
+	end
+	return "reserved"
+end
+
+local function effectiveServerType()
+	local serverType = detectServerType()
+	if serverType == "reserved" then
+		return state.prefs.reservedAs
+	end
+	return serverType
+end
+
+-- Fitur otomatis hanya berjalan bila tipe server cocok dengan pilihan "Mode server".
+local function serverAllowed()
+	local mode = state.prefs.serverMode
+	return mode == "all" or effectiveServerType() == mode
+end
+
+--------------------------------------------------------------------------------
+-- STATUS + LOG KE CONSOLE EXECUTOR
+--------------------------------------------------------------------------------
+
+ui.logKindName = function(kind)
+	if kind == "error" then return "ERROR" end
+	if kind == "warning" then return "WARN" end
+	if kind == "success" then return "OK" end
+	return "INFO"
+end
+
+-- Log TIDAK ditampilkan di UI script, tetapi dicetak ke console executor (print / warn).
+-- error & warning selalu dicetak; info/success hanya bila CONFIG.ConsoleVerbose = true atau sumbernya "Startup".
+ui.addLog = function(message, kind, sourceName)
+	if message == nil then return end
+	kind = kind or "info"
+	local isProblem = kind == "error" or kind == "warning"
+	local showInConsole = isProblem or CONFIG.ConsoleVerbose or state.prefs.logVerbose or sourceName == "Startup"
+	local textValue = tostring(message):gsub("%c", " ")
+	if #textValue > 700 then textValue = textValue:sub(1, 697) .. "..." end
+	local line = string.format("%s [%s] [%s] %s", CONFIG.ConsoleTag, ui.logKindName(kind), sourceName or "Script", textValue)
+	if state.prefs.logFile then
+		local buffer = state.tools.logBuffer
+		table.insert(buffer, os.date("%H:%M:%S") .. " " .. line)
+		if #buffer > 400 then
+			table.remove(buffer, 1)
+		end
+	end
+	if not showInConsole then
+		return
+	end
+	if isProblem then
+		warn(line)
+	else
+		print(line)
+	end
+end
+
+local function setStatus(text, kind)
+	state.statusText = text
+	state.statusKind = kind or "info"
+	if refreshStatus then
+		refreshStatus()
+	end
+end
+
+local function notify(message, kind, status)
+	if ui.addLog then ui.addLog(message, kind, "Toast/Fitur") end
+	setStatus(status or message, kind)
+	if showNotification then
+		showNotification(message, kind)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- PERSISTENCE
+--------------------------------------------------------------------------------
+
+local function detectStorage()
+	-- isfile sifatnya opsional (tidak semua executor punya); readfile/writefile wajib.
+	local available = type(writefile) == "function" and type(readfile) == "function"
+	state.storage.available = available
+	state.storage.mode = available and "Executor file" or "Session only"
+end
+
+local function parseSlot(entry)
+	if type(entry) ~= "table" then
+		return nil
+	end
+	if type(entry.id) ~= "string" or #entry.id == 0 or #entry.id > 64 then
+		return nil
+	end
+	local name = sanitizeName(type(entry.name) == "string" and entry.name or "")
+	if not name or name == "" then
+		return nil
+	end
+	local cf = deserializeCFrame(entry.cframe)
+	if not cf then
+		return nil
+	end
+	if not isFinite(entry.placeId) then
+		return nil
+	end
+	local camRel = nil
+	if entry.camera ~= nil then
+		camRel = deserializeCFrame(entry.camera)
+	end
+	-- v13: info kamera tambahan (jarak zoom, FOV, mode kamera); slot lama tidak punya = hanya arah kamera.
+	local cam = nil
+	if type(entry.camInfo) == "table" then
+		local info = entry.camInfo
+		cam = {}
+		if isFinite(info.dist) and info.dist >= 0 and info.dist <= 500 then
+			cam.dist = info.dist
+		end
+		if isFinite(info.fov) and info.fov >= 1 and info.fov <= 120 then
+			cam.fov = info.fov
+		end
+		if info.mode == "Classic" or info.mode == "LockFirstPerson" then
+			cam.mode = info.mode
+		end
+	end
+	return {
+		id = entry.id,
+		name = name,
+		cf = cf,
+		camRel = camRel,
+		cam = cam,
+		placeId = entry.placeId,
+		gameId = isFinite(entry.gameId) and entry.gameId or 0,
+		savedAt = isFinite(entry.savedAt) and entry.savedAt or os.time(),
+	}
+end
+
+local function visibleSlots()
+	local list = {}
+	for _, slot in ipairs(state.slots) do
+		if slot.placeId == game.PlaceId then
+			table.insert(list, slot)
+		end
+	end
+	return list
+end
+
+local function getSelectedSlot()
+	if not state.selectedId then
+		return nil
+	end
+	for _, slot in ipairs(state.slots) do
+		if slot.id == state.selectedId and slot.placeId == game.PlaceId then
+			return slot
+		end
+	end
+	return nil
+end
+
+local function loadSavedData()
+	if not state.storage.available then
+		table.insert(pendingNotices, {
+			"Penyimpanan file executor tidak tersedia. Posisi hanya tersimpan selama sesi.",
+			"warning",
+		})
+		return
+	end
+
+	local okRead, raw = pcall(function()
+		if type(isfile) == "function" and not isfile(CONFIG.DataFile) then
+			return nil
+		end
+		return readfile(CONFIG.DataFile)
+	end)
+	if not okRead then
+		if type(isfile) == "function" then
+			table.insert(pendingNotices, { "Gagal membaca file data tersimpan.", "error" })
+			return
+		end
+		raw = nil -- tanpa isfile, error baca berarti file belum ada (run pertama)
+	end
+	if raw == nil or type(raw) ~= "string" or raw:match("^%s*$") then
+		return
+	end
+
+	local okDecode, data = pcall(HttpService.JSONDecode, HttpService, raw)
+	if not okDecode or type(data) ~= "table" or type(data.slots) ~= "table" then
+		pcall(writefile, CONFIG.DataFile .. ".corrupt", raw)
+		table.insert(pendingNotices, {
+			"File data rusak atau formatnya tidak sesuai. Salinan disimpan sebagai .corrupt.",
+			"error",
+		})
+		return
+	end
+
+	local seen = {}
+	local restored, skipped = 0, 0
+	for _, entry in ipairs(data.slots) do
+		local slot = parseSlot(entry)
+		if slot and not seen[slot.id] then
+			seen[slot.id] = true
+			table.insert(state.slots, slot)
+			if slot.placeId == game.PlaceId then
+				restored += 1
+			end
+		else
+			skipped += 1
+		end
+	end
+
+	local settings = data.settings
+	if type(settings) == "table" then
+		if type(settings.autoReturn) == "boolean" then
+			state.autoReturn = settings.autoReturn
+		end
+		if type(settings.selectedId) == "string" then
+			state.selectedId = settings.selectedId
+		end
+		local keyCode = resolveKeyCode(settings.antiAfkKey)
+		if keyCode then
+			state.afk.keyCode = keyCode
+		end
+		if isFinite(settings.antiAfkMinutes) and settings.antiAfkMinutes % 1 == 0
+			and settings.antiAfkMinutes >= CONFIG.AfkMinMinutes
+			and settings.antiAfkMinutes <= CONFIG.AfkMaxMinutes then
+			state.afk.minutes = settings.antiAfkMinutes
+		end
+		if type(settings.antiAfkEnabled) == "boolean" then
+			state.afk.resume = settings.antiAfkEnabled
+		end
+		if isFinite(settings.walkSpeedPct) and settings.walkSpeedPct >= CONFIG.SpeedMin and settings.walkSpeedPct <= CONFIG.SpeedMax then
+			state.walkSpeedPct = settings.walkSpeedPct
+		end
+		if isFinite(settings.autoDelay) and settings.autoDelay >= 0 and settings.autoDelay <= CONFIG.DelayMax then
+			state.autoDelay = settings.autoDelay
+		end
+		if isFinite(settings.autoTrigger) and settings.autoTrigger >= CONFIG.TriggerMin and settings.autoTrigger <= CONFIG.TriggerMax then
+			state.autoTrigger = math.floor(settings.autoTrigger / 0.5 + 0.5) * 0.5
+		end
+
+		-- Pengaturan Find
+		if type(settings.findCategories) == "table" then
+			for _, category in ipairs(FIND_CATEGORIES) do
+				if type(settings.findCategories[category.id]) == "boolean" then
+					state.find.categories[category.id] = settings.findCategories[category.id]
+				end
+			end
+		end
+		if type(settings.findCustom) == "string" then
+			state.find.custom = sanitizeKeywords(settings.findCustom)
+		end
+		if type(settings.findAvoidWater) == "boolean" then
+			state.find.avoidWater = settings.findAvoidWater
+		end
+		if type(settings.findAvoidHazard) == "boolean" then
+			state.find.avoidHazard = settings.findAvoidHazard
+		end
+		if type(settings.findLoopEnabled) == "boolean" then
+			state.find.loopEnabled = settings.findLoopEnabled
+		end
+		if settings.findMode == "walk" or settings.findMode == "teleport" then
+			state.find.mode = settings.findMode
+		end
+		if type(settings.findJumpHighCoinGold) == "boolean" then
+			state.find.jumpHighCoinGold = settings.findJumpHighCoinGold
+		end
+		if type(settings.findInteractEnabled) == "table" then
+			for _, category in ipairs(FIND_CATEGORIES) do
+				if type(settings.findInteractEnabled[category.id]) == "boolean" then
+					state.find.interactEnabled[category.id] = settings.findInteractEnabled[category.id]
+				end
+			end
+		end
+		if type(settings.findInteractKeys) == "table" then
+			for _, category in ipairs(FIND_CATEGORIES) do
+				local keyCode = resolveKeyCode(settings.findInteractKeys[category.id])
+				if keyCode then
+					state.find.interactKeys[category.id] = keyCode
+				end
+			end
+		end
+		if type(settings.findKinds) == "table" then
+			for _, kind in ipairs(FIND_KINDS) do
+				if type(settings.findKinds[kind.id]) == "boolean" then
+					state.find.kinds[kind.id] = settings.findKinds[kind.id]
+				end
+			end
+		end
+		if type(settings.findTriggers) == "table" then
+			for _, trigger in ipairs(FIND_TRIGGERS) do
+				if type(settings.findTriggers[trigger.id]) == "boolean" then
+					state.find.triggers[trigger.id] = settings.findTriggers[trigger.id]
+				end
+			end
+		end
+		if isFinite(settings.findStandoff) and settings.findStandoff >= CONFIG.FindStandoffMin and settings.findStandoff <= CONFIG.FindStandoffMax then
+			state.find.standoff = math.floor(settings.findStandoff + 0.5)
+		end
+		if type(settings.autoExecuteEnabled) == "boolean" then
+			state.advanced.autoExecuteEnabled = settings.autoExecuteEnabled
+		end
+		if type(settings.autoExecuteUrl) == "string" and #settings.autoExecuteUrl <= CONFIG.AutoExecuteUrlMaxLength then
+			state.advanced.scriptUrl = settings.autoExecuteUrl
+		end
+		if type(settings.antiStuckEnabled) == "boolean" then
+			state.advanced.antiStuckEnabled = settings.antiStuckEnabled
+		end
+		if type(settings.naturalMove) == "boolean" then
+			state.advanced.naturalMove = settings.naturalMove
+		end
+		if type(settings.footstepAssist) == "boolean" then
+			state.advanced.footstepAssist = settings.footstepAssist
+		end
+		if type(settings.autoRejoinWhenEmpty) == "boolean" then
+			state.rejoin.autoWhenEmpty = settings.autoRejoinWhenEmpty
+		end
+		if isFinite(settings.manualRejoinMinutes) and settings.manualRejoinMinutes % 1 == 0
+			and settings.manualRejoinMinutes >= CONFIG.ManualRejoinMinMinutes
+			and settings.manualRejoinMinutes <= CONFIG.ManualRejoinMaxMinutes then
+			state.rejoin.manualMinutes = settings.manualRejoinMinutes
+		end
+		if type(settings.manualRejoinRepeat) == "boolean" then
+			state.rejoin.manualRepeat = settings.manualRejoinRepeat
+		end
+		local home = settings.npcHome
+		if type(home) == "table" and isFinite(home.placeId) and type(home.cframe) == "table" and deserializeCFrame(home.cframe) then
+			state.npc.savedHome = { placeId = home.placeId, cframe = home.cframe }
+		end
+		if type(settings.findRescanEachItem) == "boolean" then
+			state.find.rescanEachItem = settings.findRescanEachItem
+		end
+		if isFinite(settings.findSpeedPct) and settings.findSpeedPct >= CONFIG.SpeedMin and settings.findSpeedPct <= CONFIG.SpeedMax then
+			state.find.speedPct = settings.findSpeedPct
+		end
+	end
+
+	-- Pengaturan baru (v12): preferensi, statistik, riwayat server, preset Find.
+	loadPrefs(data.settings and data.settings.prefs)
+	loadStats(data.stats)
+	loadHistory(data.history)
+	loadPresets(data.presets)
+
+	if not getSelectedSlot() then
+		local list = visibleSlots()
+		state.selectedId = list[1] and list[1].id or nil
+	end
+	if not state.selectedId then
+		state.autoReturn = false
+	end
+
+	if restored > 0 then
+		table.insert(pendingNotices, {
+			string.format("Data berhasil dipulihkan: %d posisi.", restored),
+			"success",
+		})
+	end
+	if skipped > 0 then
+		table.insert(pendingNotices, {
+			string.format("%d entri data tidak valid dilewati.", skipped),
+			"warning",
+		})
+	end
+end
+
+-- Menyimpan SEMUA data + pengaturan. Aman dipanggil berulang: bila isi tidak berubah, tidak menulis ulang.
+-- Setiap penulisan diverifikasi dengan membaca balik file; gagal -> dicoba sekali lagi.
+persistSavedData = function()
+	if not state.storage.available then
+		return false
+	end
+
+	local serialized = {}
+	for _, slot in ipairs(state.slots) do
+		local position = slot.cf.Position
+		local _, yaw = slot.cf:ToOrientation()
+		table.insert(serialized, {
+			id = slot.id,
+			name = slot.name,
+			placeId = slot.placeId,
+			gameId = slot.gameId,
+			savedAt = slot.savedAt,
+			position = { x = position.X, y = position.Y, z = position.Z },
+			yaw = math.deg(yaw),
+			cframe = { slot.cf:GetComponents() },
+			camera = slot.camRel and { slot.camRel:GetComponents() } or nil,
+			camInfo = slot.cam,
+		})
+	end
+
+	local findInteractKeyNames = {}
+	for _, category in ipairs(FIND_CATEGORIES) do
+		local keyCode = state.find.interactKeys[category.id]
+		findInteractKeyNames[category.id] = keyCode and keyCode.Name or "E"
+	end
+
+	local payload = {
+		version = CONFIG.DataVersion,
+		settings = {
+			autoReturn = state.autoReturn,
+			selectedId = state.selectedId,
+			antiAfkKey = state.afk.keyCode.Name,
+			antiAfkMinutes = state.afk.minutes,
+			antiAfkEnabled = state.afk.active,
+			walkSpeedPct = state.walkSpeedPct,
+			autoDelay = state.autoDelay,
+			autoTrigger = state.autoTrigger,
+			findCategories = state.find.categories,
+			findCustom = state.find.custom,
+			findAvoidWater = state.find.avoidWater,
+			findAvoidHazard = state.find.avoidHazard,
+			findLoopEnabled = state.find.loopEnabled,
+			findMode = state.find.mode,
+			findJumpHighCoinGold = state.find.jumpHighCoinGold,
+			findInteractEnabled = state.find.interactEnabled,
+			findInteractKeys = findInteractKeyNames,
+			findSpeedPct = state.find.speedPct,
+			findKinds = state.find.kinds,
+			findTriggers = state.find.triggers,
+			findStandoff = state.find.standoff,
+			autoExecuteEnabled = state.advanced.autoExecuteEnabled,
+			autoExecuteUrl = state.advanced.scriptUrl,
+			antiStuckEnabled = state.advanced.antiStuckEnabled,
+			naturalMove = state.advanced.naturalMove,
+			footstepAssist = state.advanced.footstepAssist,
+			autoRejoinWhenEmpty = state.rejoin.autoWhenEmpty,
+			manualRejoinMinutes = state.rejoin.manualMinutes,
+			manualRejoinRepeat = state.rejoin.manualRepeat,
+			npcHome = state.npc.savedHome,
+			findRescanEachItem = state.find.rescanEachItem,
+			prefs = state.prefs,
+		},
+		slots = serialized,
+		stats = state.stats,
+		history = state.server.history,
+		presets = state.presets,
+	}
+
+	local okEncode, encoded = pcall(HttpService.JSONEncode, HttpService, payload)
+	if not okEncode then
+		return false
+	end
+	if encoded == state.lastEncoded then
+		return true
+	end
+
+	local function attempt()
+		local okWrite = pcall(function()
+			-- Jika isfolder tidak tersedia, coba buat folder secara aman; bila folder sudah ada,
+			-- kegagalan makefolder tidak menghalangi writefile untuk mencoba menyimpan.
+			if type(makefolder) == "function" then
+				local needsFolder = true
+				if type(isfolder) == "function" then
+					local okFolder, exists = pcall(isfolder, CONFIG.DataFolder)
+					needsFolder = not (okFolder and exists)
+				end
+				if needsFolder then pcall(makefolder, CONFIG.DataFolder) end
+			end
+			writefile(CONFIG.DataFile, encoded)
+		end)
+		if not okWrite then
+			return false
+		end
+		local okBack, back = pcall(readfile, CONFIG.DataFile)
+		-- Bandingkan seluruh isi, bukan hanya panjang teks (dua file berbeda dapat berukuran sama).
+		return okBack and type(back) == "string" and back == encoded
+	end
+
+	if attempt() or attempt() then
+		state.lastEncoded = encoded
+		state.storage.lastSavedAt = os.time()
+		return true
+	end
+
+	if os.clock() - state.lastPersistError > 5 then
+		state.lastPersistError = os.clock()
+		notify("Gagal menulis file data. Perubahan hanya berlaku di sesi ini.", "error")
+	end
+	return false
+end
+
+--------------------------------------------------------------------------------
+-- ADVANCED: AUTOEXECUTE / REJOIN
+--------------------------------------------------------------------------------
+
+local function isValidHttpUrl(value)
+	return type(value) == "string"
+		and #value > 0
+		and #value <= CONFIG.AutoExecuteUrlMaxLength
+		and (value:match("^https://") ~= nil or value:match("^http://") ~= nil)
+end
+
+local function findQueueOnTeleport()
+	local candidates = {
+		type(queue_on_teleport) == "function" and queue_on_teleport or nil,
+		globalEnv.queue_on_teleport,
+		globalEnv.queueonteleport,
+		type(globalEnv.syn) == "table" and globalEnv.syn.queue_on_teleport or nil,
+		type(globalEnv.fluxus) == "table" and globalEnv.fluxus.queue_on_teleport or nil,
+	}
+	for _, candidate in pairs(candidates) do
+		if type(candidate) == "function" then
+			return candidate
+		end
+	end
+	return nil
+end
+
+local function queueAutoExecute(resumeFindAfterTeleport)
+	local queueFn = findQueueOnTeleport()
+	if not queueFn then
+		return false, "Executor ini tidak menyediakan queue_on_teleport."
+	end
+
+	local payload
+	if state.advanced.autoExecuteEnabled then
+		local url = state.advanced.scriptUrl
+		if not isValidHttpUrl(url) then
+			return false, "Masukkan URL raw script berawalan http:// atau https:// terlebih dahulu."
+		end
+		local quotedUrl = string.format("%q", url)
+		payload = string.format([[
+local url = %s
+local resumeFind = %s
+local env = (type(getgenv) == "function" and getgenv()) or _G
+env.__IsekaiReturnSystemAutoExecuteManaged = true
+env.__IsekaiReturnSystemAutoExecuteEnabled = true
+env.__IsekaiReturnSystemAutoExecuteURL = url
+env.__IsekaiReturnSystemResumeFindAfterTeleport = resumeFind
+local ok, err = pcall(function()
+	local source = game:HttpGet(url)
+	local chunk, compileError = loadstring(source)
+	assert(type(chunk) == "function", tostring(compileError or "loadstring gagal"))
+	chunk()
+end)
+if not ok then
+	warn("[AutonomousSystem] Autoexecute gagal: " .. tostring(err))
+end
+]], quotedUrl, resumeFindAfterTeleport and "true" or "false")
+	else
+		-- Mengganti antrean sebelumnya dengan no-op jika executor mendukung antrean tunggal.
+		payload = "-- Isekai Autonomous System autoexecute disabled\n"
+	end
+
+	local ok, err = pcall(queueFn, payload)
+	if not ok then
+		return false, "Gagal mendaftarkan autoexecute: " .. tostring(err)
+	end
+	return true, "Autoexecute disiapkan untuk teleport/rejoin berikutnya."
+end
+
+local function setAutoExecuteGlobals(enabled, url)
+	globalEnv.__IsekaiReturnSystemAutoExecuteManaged = true
+	globalEnv.__IsekaiReturnSystemAutoExecuteEnabled = enabled == true
+	globalEnv.__IsekaiReturnSystemAutoExecuteURL = type(url) == "string" and url or ""
+end
+
+--------------------------------------------------------------------------------
+-- SLOT MANAGEMENT
+--------------------------------------------------------------------------------
+
+local function getCharacterParts()
+	local character = player.Character
+	if not character then
+		return nil, nil, nil
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = (humanoid and humanoid.RootPart) or character:FindFirstChild("HumanoidRootPart")
+	return character, humanoid, root
+end
+
+local function nextDefaultName()
+	local used = {}
+	for _, slot in ipairs(visibleSlots()) do
+		used[slot.name:lower()] = true
+	end
+	for i = 1, CONFIG.MaxSlots + 1 do
+		local candidate = "Save " .. i
+		if not used[candidate:lower()] then
+			return candidate
+		end
+	end
+	return "Save " .. (#state.slots + 1)
+end
+
+local function findSlotByName(name)
+	for _, slot in ipairs(visibleSlots()) do
+		if slot.name:lower() == name:lower() then
+			return slot
+		end
+	end
+	return nil
+end
+
+local function savePosition(rawName)
+	if state.closed then
+		return false
+	end
+	if state.busy then
+		notify("Tunggu perjalanan selesai (atau tekan Stop) sebelum menyimpan.", "info")
+		return false
+	end
+
+	local character, humanoid, root = getCharacterParts()
+	if not character or not humanoid or not root or not root.Parent then
+		notify("Karakter belum siap. Coba lagi sebentar.", "warning")
+		return false
+	end
+	if humanoid.Health <= 0 then
+		notify("Tidak bisa menyimpan posisi saat karakter mati.", "warning")
+		return false
+	end
+
+	local cf = root.CFrame
+	local position = cf.Position
+	if not isFinite(position.X) or not isFinite(position.Y) or not isFinite(position.Z) then
+		notify("Posisi tidak valid (koordinat rusak).", "error")
+		return false
+	end
+	if position.Y < Workspace.FallenPartsDestroyHeight + 20 then
+		notify("Posisi tidak valid: terlalu dekat dengan batas void.", "error")
+		return false
+	end
+
+	local humanoidState = humanoid:GetState()
+	if humanoidState == Enum.HumanoidStateType.Freefall
+		or humanoidState == Enum.HumanoidStateType.Jumping
+		or humanoidState == Enum.HumanoidStateType.FallingDown
+		or humanoidState == Enum.HumanoidStateType.Ragdoll then
+		notify("Tunggu sampai karakter mendarat sebelum menyimpan.", "warning")
+		return false
+	end
+	if humanoid.SeatPart then
+		notify("Berdiri dari kursi dulu sebelum menyimpan posisi.", "warning")
+		return false
+	end
+
+	local list = visibleSlots()
+	if #list >= CONFIG.MaxSlots then
+		notify(string.format("Slot penuh (%d/%d). Hapus satu slot dulu.", #list, CONFIG.MaxSlots), "warning")
+		return false
+	end
+
+	local name, nameError = sanitizeName(rawName)
+	if not name then
+		notify(nameError, "warning")
+		return false
+	end
+	if name == "" then
+		name = nextDefaultName()
+	elseif findSlotByName(name) then
+		notify(string.format("Nama \"%s\" sudah dipakai. Gunakan nama lain.", name), "warning")
+		return false
+	end
+
+	for _, slot in ipairs(list) do
+		if (slot.cf.Position - position).Magnitude < CONFIG.DuplicateDistance
+			and slot.cf.LookVector:Dot(cf.LookVector) > 0.99 then
+			notify(string.format("Posisi yang sama sudah tersimpan di \"%s\".", slot.name), "info")
+			return false
+		end
+	end
+
+	local camera = Workspace.CurrentCamera
+	local camRel = camera and cf:ToObjectSpace(camera.CFrame) or nil
+	-- v13: simpan juga jarak zoom, FOV, dan mode kamera (arah kamera sudah ada di camRel).
+	local camInfo = nil
+	if camera then
+		local dist = (camera.CFrame.Position - camera.Focus.Position).Magnitude
+		local fov = camera.FieldOfView
+		camInfo = {
+			dist = isFinite(dist) and math.floor(dist * 100 + 0.5) / 100 or nil, -- NaN merusak JSONEncode (semua simpanan gagal)
+			fov = isFinite(fov) and math.floor(fov * 100 + 0.5) / 100 or nil,
+			mode = player.CameraMode == Enum.CameraMode.LockFirstPerson and "LockFirstPerson" or "Classic",
+		}
+	end
+
+	local slot = {
+		id = HttpService:GenerateGUID(false),
+		name = name,
+		cf = cf,
+		camRel = camRel,
+		cam = camInfo,
+		placeId = game.PlaceId,
+		gameId = game.GameId,
+		savedAt = os.time(),
+	}
+	table.insert(state.slots, slot)
+
+	local selectedNow = false
+	if not getSelectedSlot() then
+		state.selectedId = slot.id
+		selectedNow = true
+	end
+
+	persistSavedData()
+	if ui.nameBox then
+		ui.nameBox.Text = ""
+	end
+	refreshUI()
+
+	if selectedNow then
+		notify(string.format("Save Position \"%s\" berhasil disimpan dan dipilih.", name), "success")
+	else
+		notify(string.format("Save Position \"%s\" berhasil disimpan.", name), "success")
+	end
+	return true
+end
+
+local function selectSlot(id)
+	if state.closed then
+		return
+	end
+	for _, slot in ipairs(visibleSlots()) do
+		if slot.id == id then
+			state.selectedId = id
+			state.autoPauseUntil = 0
+			persistSavedData()
+			refreshUI()
+			notify(string.format("Slot aktif: %s", slot.name), "success")
+			return
+		end
+	end
+end
+
+local function deletePosition(id)
+	for index, slot in ipairs(state.slots) do
+		if slot.id == id and slot.placeId == game.PlaceId then
+			table.remove(state.slots, index)
+			state.moveToken += 1
+			if state.selectedId == id then
+				local remaining = visibleSlots()
+				state.selectedId = remaining[1] and remaining[1].id or nil
+				if not state.selectedId then
+					state.autoReturn = false
+				end
+			end
+			persistSavedData()
+			refreshUI()
+			notify(string.format("Data \"%s\" berhasil dihapus.", slot.name), "success")
+			return true
+		end
+	end
+	notify("Slot tidak ditemukan.", "warning")
+	return false
+end
+
+local function deleteAllPositions()
+	local count = #state.slots
+	table.clear(state.slots)
+	state.selectedId = nil
+	state.autoReturn = false
+	state.moveToken += 1
+	persistSavedData()
+	refreshUI()
+	notify(string.format("Semua data berhasil dihapus (%d slot).", count), "success")
+end
+
+--------------------------------------------------------------------------------
+-- TELEPORT / RETURN
+--------------------------------------------------------------------------------
+
+local function waitForCharacter(timeout)
+	local deadline = os.clock() + timeout
+	while not state.closed do
+		local character, humanoid, root = getCharacterParts()
+		if character and humanoid and root and root.Parent and character:IsDescendantOf(Workspace) then
+			return character, humanoid, root
+		end
+		if os.clock() >= deadline then
+			break
+		end
+		task.wait(0.1)
+	end
+	return nil, nil, nil
+end
+
+-- Memulihkan kamera tersimpan (arah, jarak zoom, FOV, mode kamera) setelah karakter tiba di slot. Kamera bawaan Roblox memakai
+-- jarak zoomnya sendiri, jadi batas zoom dijepit sementara ke jarak tersimpan lalu dikembalikan.
+local function restoreSlotCamera(slot, targetCF, humanoid)
+	local camera = Workspace.CurrentCamera
+	if not (camera and slot.camRel and camera.CameraType == Enum.CameraType.Custom and camera.CameraSubject == humanoid) then
+		return false
+	end
+	local info = slot.cam
+	local oldMin, oldMax = player.CameraMinZoomDistance, player.CameraMaxZoomDistance
+	local clamped = false
+	-- Dicatat agar hook cleanup bisa memulihkan batas zoom / CameraType bila script dihentikan di tengah proses.
+	state.camRestore = { min = oldMin, max = oldMax }
+	pcall(function()
+		if info and info.mode then
+			local wanted = info.mode == "LockFirstPerson" and Enum.CameraMode.LockFirstPerson or Enum.CameraMode.Classic
+			if player.CameraMode ~= wanted then
+				player.CameraMode = wanted
+			end
+		end
+		if info and info.dist then
+			local dist = math.max(0.5, info.dist)
+			player.CameraMaxZoomDistance = math.max(dist, oldMax)
+			player.CameraMinZoomDistance = dist
+			player.CameraMaxZoomDistance = dist
+			clamped = true
+		end
+		if info and info.fov then
+			camera.FieldOfView = info.fov
+		end
+		camera.CameraType = Enum.CameraType.Scriptable
+		camera.CFrame = targetCF * slot.camRel
+		task.wait(0.06) -- cukup beberapa frame; tidak memakai RenderStepped (tidak jalan saat jendela diminimalkan)
+		camera.CameraType = Enum.CameraType.Custom
+		if clamped then
+			task.wait(0.15)
+		end
+	end)
+	if camera.CameraType ~= Enum.CameraType.Custom then
+		pcall(function()
+			camera.CameraType = Enum.CameraType.Custom
+		end)
+	end
+	if clamped then
+		pcall(function()
+			player.CameraMaxZoomDistance = oldMax
+			player.CameraMinZoomDistance = oldMin
+		end)
+	end
+	state.camRestore = nil
+	return true
+end
+
+table.insert(cleanupHooks, function()
+	local pending = state.camRestore
+	if pending then
+		state.camRestore = nil
+		pcall(function()
+			player.CameraMaxZoomDistance = pending.max
+			player.CameraMinZoomDistance = pending.min
+			local camera = Workspace.CurrentCamera
+			if camera and camera.CameraType == Enum.CameraType.Scriptable then
+				camera.CameraType = Enum.CameraType.Custom
+			end
+		end)
+	end
+end)
+
+-- Mengembalikan CFrame tujuan yang aman, catatan opsional, atau nil + alasan.
+local function resolveSafeCFrame(target, character, root)
+	local position = target.Position
+	if not isFinite(position.X) or not isFinite(position.Y) or not isFinite(position.Z) then
+		return nil, "Posisi tujuan tidak valid."
+	end
+	if position.Y < Workspace.FallenPartsDestroyHeight + 5 then
+		return nil, "Posisi tujuan berada di bawah batas void."
+	end
+
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = { character }
+	local ground = Workspace:Raycast(position, Vector3.new(0, -40, 0), rayParams)
+	if not ground then
+		return nil, "Tidak ada permukaan di bawah posisi tujuan. Teleport dibatalkan agar tidak jatuh."
+	end
+
+	local boxCFrame, boxSize = character:GetBoundingBox()
+	local offset = root.CFrame:ToObjectSpace(boxCFrame)
+	local testSize = Vector3.new(math.max(boxSize.X - 0.4, 0.2), math.max(boxSize.Y - 0.6, 0.2), math.max(boxSize.Z - 0.4, 0.2))
+
+	local overlapParams = OverlapParams.new()
+	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+	overlapParams.FilterDescendantsInstances = { character }
+
+	local lift = 0
+	while lift <= CONFIG.MaxLift do
+		local candidate = target + Vector3.new(0, lift, 0)
+		local parts = Workspace:GetPartBoundsInBox(candidate * offset, testSize, overlapParams)
+		local blocked = false
+		for _, part in ipairs(parts) do
+			if part.CanCollide then
+				blocked = true
+				break
+			end
+		end
+		if not blocked then
+			if lift > 0 then
+				return candidate, string.format("Posisi dinaikkan %.1f stud agar tidak menembus objek.", lift)
+			end
+			return candidate, nil
+		end
+		lift += CONFIG.LiftStep
+	end
+	return target, "Posisi tujuan terhalang objek; teleport tetap dilakukan."
+end
+
+local function restoreWalkSpeed()
+	local walk = state.walk
+	state.walk = nil
+	if walk and walk.humanoid and walk.humanoid.Parent then
+		walk.humanoid.WalkSpeed = walk.original
+		local root = walk.humanoid.RootPart
+		if root then
+			walk.humanoid:MoveTo(root.Position) -- hentikan gerakan yang tersisa
+		end
+	end
+end
+
+-- pct opsional: persentase kecepatan (default = kecepatan Return). Find memakai kecepatannya sendiri.
+local function applyWalkSpeed(humanoid, pct)
+	pct = pct or state.walkSpeedPct
+	local original = humanoid.WalkSpeed
+	state.walk = { humanoid = humanoid, original = original, pct = pct }
+	if pct ~= 100 then
+		humanoid.WalkSpeed = original * pct / 100
+	end
+end
+
+local function flatten(vector)
+	return Vector3.new(vector.X, 0, vector.Z)
+end
+
+-- Titik di permukaan tanah tepat di bawah tujuan (lebih andal untuk Pathfinding daripada titik di udara).
+local function groundGoal(character, position)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+	local hit = Workspace:Raycast(position + Vector3.new(0, 2, 0), Vector3.new(0, -40, 0), params)
+	return hit and hit.Position or position
+end
+
+local STEER_ANGLES = { 30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180 }
+
+-- Mencari arah jalan yang terbuka (tidak ada tembok & ada lantai di depan). `sign` menentukan sisi yang dicoba duluan.
+local function findOpenDirection(character, root, desired, sign, skipStraight)
+	if desired.Magnitude < 0.01 then
+		desired = flatten(root.CFrame.LookVector)
+	end
+	desired = desired.Unit
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+	params.RespectCanCollide = true
+	local origin = root.Position
+
+	local function isOpen(dir)
+		for _, height in ipairs({ -2, 0.5, 2 }) do
+			if Workspace:Raycast(origin + Vector3.new(0, height, 0), dir * 6, params) then
+				return false
+			end
+		end
+		-- harus ada lantai di depan (hindari melangkah ke jurang/void)
+		return Workspace:Raycast(origin + dir * 5, Vector3.new(0, -14, 0), params) ~= nil
+	end
+
+	if not skipStraight and isOpen(desired) then
+		return desired
+	end
+	for _, angle in ipairs(STEER_ANGLES) do
+		local dir = CFrame.Angles(0, math.rad(angle * sign), 0):VectorToWorldSpace(desired)
+		if isOpen(dir) then
+			return dir
+		end
+	end
+	return nil
+end
+
+local function isSeated(humanoid)
+	return humanoid.SeatPart ~= nil or humanoid.Sit
+end
+
+-- Berdiri dari kursi TANPA meloncat: Sit dimatikan, SeatWeld dilepas lokal. Loncat hanya cadangan terakhir
+-- bila Anti-Sit OFF (dengan Anti-Sit ON tidak pernah meloncat).
+local function leaveSeat(humanoid, cancelled)
+	local deadline = os.clock() + 4
+	local attempt = 0
+	while isSeated(humanoid) and os.clock() < deadline do
+		if cancelled() then
+			return false
+		end
+		attempt += 1
+		humanoid.Sit = false
+		if attempt >= 2 then
+			local seat = humanoid.SeatPart
+			local weld = seat and seat:FindFirstChild("SeatWeld")
+			if weld then
+				pcall(weld.Destroy, weld)
+			end
+		end
+		if attempt >= 5 and not state.prefs.antiSit then
+			humanoid.Jump = true
+		end
+		task.wait(0.35)
+	end
+	if cancelled() then
+		return false
+	end
+	task.wait(0.25)
+	return not isSeated(humanoid)
+end
+
+-- Teleport langsung (HANYA cadangan setelah batas waktu berjalan habis).
+local function teleportToSlot(slot, character, humanoid, root, token, restoreCamera)
+	local target, note = resolveSafeCFrame(slot.cf, character, root)
+	if not target then
+		return false, note, "error"
+	end
+	if state.closed or token ~= state.moveToken then
+		return false, nil, nil
+	end
+
+	if humanoid.SeatPart then
+		humanoid.Sit = false
+		RunService.Heartbeat:Wait()
+		if state.closed or token ~= state.moveToken or player.Character ~= character or not root.Parent then
+			return false, nil, nil
+		end
+	end
+
+	root.CFrame = target
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	RunService.Heartbeat:Wait()
+
+	if state.closed or player.Character ~= character or not root.Parent then
+		return false, nil, nil
+	end
+	root.CFrame = target
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+
+	if restoreCamera then
+		restoreSlotCamera(slot, target, humanoid)
+	end
+
+	return true, note, note and "warning" or nil
+end
+
+-- Menghitung rute. Mencoba beberapa variasi ukuran agen agar celah sempit / tepi tembok tidak menggagalkan rute.
+-- options (opsional, dipakai Find): { avoidWater = bool, validate = function(waypoints) -> bool }
+local function computeWaypoints(root, humanoid, goal, radiusBoost, options)
+	local baseRadius = math.max(2, root.Size.X / 2 + 0.5)
+	local height = math.max(5, root.Size.Y + humanoid.HipHeight * 2)
+	local variants = {
+		{ radius = baseRadius + radiusBoost, climb = true },
+		{ radius = math.max(1, baseRadius - 0.8), climb = true },
+		{ radius = baseRadius + radiusBoost + 1.5, climb = false },
+	}
+	for _, variant in ipairs(variants) do
+		local params = {
+			AgentRadius = variant.radius,
+			AgentHeight = height,
+			AgentCanJump = true,
+			AgentCanClimb = variant.climb,
+			WaypointSpacing = 4,
+		}
+		if options and options.avoidWater then
+			params.Costs = { Water = math.huge } -- air tidak boleh dilewati
+		end
+		local path = PathfindingService:CreatePath(params)
+		local ok = pcall(function()
+			path:ComputeAsync(root.Position, goal)
+		end)
+		if ok and path.Status == Enum.PathStatus.Success then
+			local waypoints = path:GetWaypoints()
+			if #waypoints >= 2 then
+				if not (options and options.validate) or options.validate(waypoints) then
+					return waypoints
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- Tinggi loncatan maksimum humanoid (stud), dari JumpHeight / JumpPower.
+local function maxJumpHeight(humanoid)
+	local height
+	if humanoid.UseJumpPower then
+		height = (humanoid.JumpPower * humanoid.JumpPower) / (2 * Workspace.Gravity)
+	else
+		height = humanoid.JumpHeight
+	end
+	if not isFinite(height) or height < 1 then
+		height = 4
+	end
+	return height
+end
+
+-- Deteksi penghalang di depan, diukur dari HumanoidRootPart (BUKAN dari kepala).
+-- Mengembalikan: (ada penghalang di depan, penghalang itu terlalu tinggi untuk dilompati = tembok).
+-- Sinar horizontal keluar dari titik root (lalu dari setinggi lutut); tinggi puncak penghalang diukur dengan
+-- sinar ke bawah tepat di belakang titik tabrak, lalu dibandingkan dengan tinggi loncat humanoid.
+local function checkObstacle(character, root, direction, humanoid)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+	params.RespectCanCollide = true
+	local origin = root.Position
+	local reach = 3
+	local hit = Workspace:Raycast(origin, direction * reach, params)
+		or Workspace:Raycast(origin + Vector3.new(0, -1.5, 0), direction * reach, params)
+	if not hit then
+		return false, false
+	end
+	local hipHeight = humanoid and humanoid.HipHeight or 2
+	local feetY = origin.Y - (root.Size.Y / 2 + hipHeight)
+	local hop = humanoid and maxJumpHeight(humanoid) or 4
+	local probe = hit.Position + direction * 0.15
+	local top = Workspace:Raycast(
+		Vector3.new(probe.X, feetY + hop + 2, probe.Z),
+		Vector3.new(0, -(hop + 4), 0),
+		params
+	)
+	if not top then
+		return true, true -- tidak ada permukaan dalam jangkauan loncat: tembok / terlalu tinggi
+	end
+	return true, (top.Position.Y - feetY) > hop * 0.9
+end
+
+--------------------------------------------------------------------------------
+-- TERTANAM DI BENDA PADAT (batu / dinding / tanah): deteksi + teleport keluar
+--------------------------------------------------------------------------------
+-- Sinar (raycast) yang berawal DI DALAM benda tidak mengenai benda itu, jadi findOpenDirection/clearSegment
+-- menganggap semua arah "terbuka" dan karakter hanya berputar di dalam batu. Karena itu tertanam dideteksi
+-- lewat overlap (benda) + voxel (terrain), lalu karakter dipindah ke titik bebas terdekat.
+
+-- Apakah sel terrain di titik ini padat (bukan udara / air)? Sel terrain berukuran 4 stud dan occupancy adalah
+-- tingkat isinya, bukan "titik ini di dalam tanah". Untuk memastikan titik benar-benar di dalam massa terrain, pakai
+-- ambang tinggi (level 0.9); untuk memilih titik tujuan yang aman pakai ambang rendah (0.4 = lebih berhati-hati).
+local function terrainSolidAt(position, level)
+	level = level or 0.55
+	local ok, result = pcall(function()
+		local terrain = Workspace.Terrain
+		local cell = terrain:WorldToCell(position)
+		local minCorner = cell * 4
+		local region = Region3.new(minCorner, minCorner + Vector3.new(4, 4, 4))
+		local materials, occupancy = terrain:ReadVoxels(region, 4)
+		local material = materials[1][1][1]
+		return material ~= Enum.Material.Air and material ~= Enum.Material.Water and occupancy[1][1][1] > level
+	end)
+	return ok and result == true
+end
+
+-- Benda yang benar-benar menghalangi tubuh? Diabaikan: tanpa tabrakan, grup tabrakan yang tidak bertabrakan
+-- dengan pemain, karakter lain, benda sangat kecil. Terrain dicek terpisah lewat voxel.
+local function isSolidObstacle(part, root)
+	if not part.CanCollide or part:IsA("Terrain") or part:IsA("TrussPart") then
+		return false
+	end
+	local size = part.Size
+	if math.max(size.X, size.Y, size.Z) < 2 then -- benda sekecil ini tidak bisa "menelan" badan
+		return false
+	end
+	local model = part:FindFirstAncestorOfClass("Model")
+	if model and model:FindFirstChildOfClass("Humanoid") then
+		return false
+	end
+	local okGroup, collidable = pcall(function()
+		return PhysicsService:CollisionGroupsAreCollidable(part.CollisionGroup, root.CollisionGroup)
+	end)
+	if okGroup and collidable == false then
+		return false
+	end
+	return true
+end
+
+local function newOverlapParams(character)
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+	return params
+end
+
+local EMBED_HALF_WIDTH = 0.5 -- inti badan selebar 1 stud: menempel ke dinding / berdiri di atas batu tidak dihitung
+
+-- Kotak uji (tak terlihat, tanpa tabrakan, tak bisa dikenai raycast) untuk GetPartsInPart.
+local embedProbe = nil
+local function getEmbedProbe()
+	if embedProbe and embedProbe:IsDescendantOf(Workspace) then
+		return embedProbe
+	end
+	if embedProbe then
+		pcall(embedProbe.Destroy, embedProbe) -- kamera lama sudah dibuang: buat probe baru
+		embedProbe = nil
+	end
+	local ok, probe = pcall(function()
+		local part = new("Part", {
+			Name = "IsekaiProbe",
+			Anchored = true,
+			CanCollide = false,
+			CanTouch = false,
+			CanQuery = false,
+			Massless = true,
+			Transparency = 1,
+			Size = Vector3.new(1, 1, 1),
+		})
+		part.Parent = Workspace.CurrentCamera or Workspace
+		return part
+	end)
+	embedProbe = ok and probe or nil
+	return embedProbe
+end
+table.insert(cleanupHooks, function()
+	if embedProbe then
+		embedProbe:Destroy()
+		embedProbe = nil
+	end
+end)
+
+-- true bila kotak `size` di `point` menembus benda padat atau massa terrain.
+-- GetPartBoundsInBox hanya membandingkan BOUNDING BOX (batu bermesh / union / silinder bisa "kena" padahal bentuk
+-- aslinya tidak menyentuh), jadi hanya jadi penyaring cepat. Kepastian lewat GetPartsInPart (bentuk sebenarnya).
+-- Bila API presisi gagal -> dianggap TIDAK menembus (lebih baik melewatkan daripada meneleport karakter yang tidak tertanam).
+local function pointBlocked(root, point, params, size, terrainLevel)
+	local maybe = false
+	for _, part in ipairs(Workspace:GetPartBoundsInBox(CFrame.new(point), size, params)) do
+		if isSolidObstacle(part, root) then
+			maybe = true
+			break
+		end
+	end
+	if maybe then
+		local probe = getEmbedProbe()
+		if probe then
+			local ok, hits = pcall(function()
+				probe.Size = size
+				probe.CFrame = CFrame.new(point)
+				return Workspace:GetPartsInPart(probe, params)
+			end)
+			if ok and type(hits) == "table" then
+				for _, part in ipairs(hits) do
+					if isSolidObstacle(part, root) then
+						return true
+					end
+				end
+			end
+		end
+	end
+	return terrainSolidAt(point, terrainLevel) or terrainSolidAt(point + Vector3.new(0, 1.2, 0), terrainLevel)
+end
+
+-- Jarak dari tengah root ke titik terendah karakter (kaki). Kotak uji dibuat lebih pendek dari jarak ini
+-- supaya kaki yang menapak lantai / batu tidak pernah ikut terhitung.
+local function bodyClearance(character, root, humanoid)
+	local ok, boxCFrame, boxSize = pcall(character.GetBoundingBox, character)
+	if ok and boxCFrame and boxSize then
+		return root.Position.Y - (boxCFrame.Position.Y - boxSize.Y / 2)
+	end
+	return humanoid.HipHeight + root.Size.Y / 2
+end
+
+local function isEmbedded(character, root, humanoid)
+	local half = 1
+	if humanoid then
+		half = math.clamp(bodyClearance(character, root, humanoid) - 1, 0.3, 1)
+	end
+	local size = Vector3.new(EMBED_HALF_WIDTH * 2, half * 2, EMBED_HALF_WIDTH * 2)
+	return pointBlocked(root, root.Position, newOverlapParams(character), size, 0.9)
+end
+
+-- Kandidat titik keluar, diurutkan dari yang paling dekat: ke atas, atau menyamping pada beberapa jarak/tinggi.
+local escapeList = nil
+local function escapeCandidates()
+	if escapeList then
+		return escapeList
+	end
+	local list = {}
+	for _, lift in ipairs({ 2, 3.5, 5, 7, 10, 14, 20, 28, 40 }) do
+		table.insert(list, { offset = Vector3.new(0, lift, 0), dist = lift })
+	end
+	for _, radius in ipairs({ 3, 5, 8, 12, 18, 26 }) do
+		for step = 0, 11 do
+			local angle = math.rad(step * 30)
+			for _, height in ipairs({ 0, 3, 6 }) do
+				local offset = Vector3.new(math.cos(angle) * radius, height, math.sin(angle) * radius)
+				table.insert(list, { offset = offset, dist = offset.Magnitude })
+			end
+		end
+	end
+	table.sort(list, function(a, b)
+		return a.dist < b.dist
+	end)
+	escapeList = list
+	return list
+end
+
+-- Titik bebas terdekat: badan muat (tidak menembus benda/terrain) dan ada lantai padat di bawahnya.
+-- Memanggil task.wait() berkala, jadi hanya boleh dipanggil dari thread (bukan event handler sinkron).
+local function findFreeSpot(character, root)
+	local params = newOverlapParams(character)
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = { character }
+	rayParams.RespectCanCollide = true
+	local origin = root.Position
+	local bodyBox = Vector3.new(1.6, 4.4, 1.6)
+	local tested = 0
+	for _, candidate in ipairs(escapeCandidates()) do
+		tested += 1
+		if tested % 40 == 0 then
+			task.wait()
+			if not root.Parent then
+				return nil
+			end
+		end
+		local point = origin + candidate.offset
+		if point.Y > Workspace.FallenPartsDestroyHeight + 10 and not pointBlocked(root, point, params, bodyBox, 0.4) then
+			local ground = Workspace:Raycast(point, Vector3.new(0, -60, 0), rayParams)
+			if ground and ground.Material ~= Enum.Material.Water and point.Y - ground.Position.Y <= 14 then
+				return point
+			end
+		end
+	end
+	return nil
+end
+
+-- Bila karakter menembus benda padat: teleport ke titik bebas terdekat. true = karakter dipindahkan.
+-- confirmSeconds > 0: karakter harus TETAP tertanam dan hampir tidak bergeser selama itu (bukan sekadar lewat dekat batu).
+local function escapeEmbedded(character, humanoid, root, confirmSeconds)
+	if not root.Parent or humanoid.Health <= 0 or humanoid:GetState() == Enum.HumanoidStateType.Climbing then
+		return false
+	end
+	if not isEmbedded(character, root, humanoid) then
+		return false
+	end
+	local from = root.Position
+	if confirmSeconds and confirmSeconds > 0 then
+		local untilAt = os.clock() + confirmSeconds
+		while os.clock() < untilAt do
+			task.wait(0.3)
+			if not root.Parent or humanoid.Health <= 0 or isSeated(humanoid) then
+				return false
+			end
+			if (root.Position - from).Magnitude > 2.5 or not isEmbedded(character, root, humanoid) then
+				return false
+			end
+		end
+	end
+	local spot = findFreeSpot(character, root)
+	if not spot or not root.Parent then
+		return false
+	end
+	root.CFrame = CFrame.new(spot) * (root.CFrame - root.CFrame.Position)
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	notify(string.format("Anti-Stuck: karakter tertanam di benda padat, dipindah %.1f stud ke titik bebas.", (spot - from).Magnitude), "warning")
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- GERAK NATURAL (mimic) + PEMULIHAN STUCK BERTAHAP  (dipakai Return & Find)
+--------------------------------------------------------------------------------
+
+local function rand(minValue, maxValue)
+	return minValue + math.random() * (maxValue - minValue)
+end
+
+-- Kecepatan efektif = kecepatan dasar x persentase slider x variasi natural.
+local function applySpeedFactor(factor)
+	local walk = state.walk
+	if walk and walk.humanoid and walk.humanoid.Parent then
+		walk.humanoid.WalkSpeed = walk.original * (walk.pct or 100) / 100 * (factor or 1)
+	end
+end
+
+-- Jalur lurus 'from' -> 'to' bebas tembok (lutut / dada / kepala) dan ada lantai (bukan air / jurang / bahaya) di ujungnya.
+local function clearSegment(character, from, to, refY)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+	params.RespectCanCollide = true
+	local delta = Vector3.new(to.X - from.X, 0, to.Z - from.Z)
+	if delta.Magnitude < 0.1 then
+		return true
+	end
+	for _, height in ipairs({ -2, 0.6, 2 }) do
+		if Workspace:Raycast(from + Vector3.new(0, height, 0), delta, params) then
+			return false
+		end
+	end
+	local ground = Workspace:Raycast(Vector3.new(to.X, from.Y + 1, to.Z), Vector3.new(0, -14, 0), params)
+	if not ground or ground.Material == Enum.Material.Water then
+		return false
+	end
+	if refY and math.abs(ground.Position.Y - refY) > 3 then
+		return false
+	end
+	return not nearHazard(ground.Position, CONFIG.HazardMargin)
+end
+
+-- Waypoint dianggap sudah dilewati bila karakter sudah melewatinya searah rute (tanpa harus menginjak titiknya).
+-- Waypoint Jump tidak pernah dilewati diam-diam.
+local function passedWaypoint(waypoints, index, pos)
+	local current, following = waypoints[index], waypoints[index + 1]
+	if not current or not following or current.Action == Enum.PathWaypointAction.Jump then
+		return false
+	end
+	if math.abs(current.Position.Y - pos.Y) >= 7 then
+		return false
+	end
+	local segment = flatten(following.Position - current.Position)
+	if segment.Magnitude < 0.1 then
+		return false
+	end
+	local relative = flatten(pos - current.Position)
+	local along = relative:Dot(segment.Unit)
+	if along <= 0 then
+		return false
+	end
+	return (relative - segment.Unit * along).Magnitude < 5
+end
+
+-- Maju ke waypoint berikutnya bila waypoint saat ini sudah tercapai (< 3 stud), sudah dilewati searah rute,
+-- atau tikungan terpotong (sudah lebih dekat ke waypoint berikutnya dan jalur lurusnya bersih).
+-- Mencegah karakter berbalik ke waypoint lama yang sudah terlewati (maju-mundur).
+local function advanceWaypoints(character, waypoints, index, pos)
+	while waypoints[index] do
+		local wp = waypoints[index]
+		local flatD = flatten(wp.Position - pos).Magnitude
+		local dy = math.abs(wp.Position.Y - pos.Y)
+		local advance = (flatD < 3 and dy < 7) or passedWaypoint(waypoints, index, pos)
+		if not advance and wp.Action ~= Enum.PathWaypointAction.Jump and flatD < 7 and dy < 4 then
+			local nxt = waypoints[index + 1]
+			if nxt and flatten(nxt.Position - pos).Magnitude < flatD
+				and clearSegment(character, pos, nxt.Position, nxt.Position.Y) then
+				advance = true
+			end
+		end
+		if not advance then
+			break
+		end
+		index += 1
+	end
+	return index
+end
+
+-- Pemain "manusia": memotong tikungan (lookahead), berkelok serong tipis, kecepatan bervariasi pelan,
+-- dan sesekali loncat kecil (kadang beruntun). Semua titik dicek bebas tembok / jurang / air sebelum dipakai.
+local function newMimic(character, root)
+	local m = {
+		seed = math.random() * 500,
+		nextHop = os.clock() + rand(4, 10),
+		hopBurst = 0,
+		lookahead = rand(8, 12),
+		amplitude = rand(1.0, 1.8),
+	}
+
+	function m:enabled()
+		return state.advanced.naturalMove == true
+	end
+
+	function m:speed(now)
+		if not self:enabled() then
+			return 1
+		end
+		return 1 + math.clamp(math.noise(self.seed, now * 0.23, 3.7) * 2, -1, 1) * 0.07
+	end
+
+	-- Titik yang dituju langkah ini. Hanya dipakai saat mengikuti rute (bukan saat pemulihan stuck).
+	function m:aim(pos, moveTarget, waypoints, wpIndex, remaining, now)
+		if not self:enabled() then
+			return moveTarget
+		end
+		local point = moveTarget
+		local refY = moveTarget.Y
+
+		-- Lookahead: lompati waypoint antara selama garis lurusnya bersih -> tikungan terpotong halus.
+		local first = waypoints and waypoints[wpIndex]
+		if first and first.Action ~= Enum.PathWaypointAction.Jump then
+			for i = wpIndex + 1, math.min(#waypoints, wpIndex + 8) do
+				local wp = waypoints[i]
+				if wp.Action == Enum.PathWaypointAction.Jump
+					or flatten(wp.Position - pos).Magnitude > self.lookahead
+					or math.abs(wp.Position.Y - pos.Y) > 3
+					or not clearSegment(character, pos, wp.Position, wp.Position.Y) then
+					break
+				end
+				point = wp.Position
+				refY = wp.Position.Y
+			end
+		end
+
+		-- Serong: pergeseran menyamping yang berubah pelan (maks ~1.8 stud). TIDAK dipakai dekat waypoint
+		-- (< 5 stud) atau bila ada waypoint Jump di depan: dulu offset > 3 stud membuat waypoint tidak pernah
+		-- masuk radius "tercapai" (3 stud) sehingga karakter berputar-putar di sekitarnya.
+		local forward = flatten(point - pos)
+		local nearWp = first and flatten(first.Position - pos).Magnitude or math.huge
+		local jumpSoon = false
+		if waypoints then
+			for i = wpIndex, math.min(#waypoints, wpIndex + 2) do
+				if waypoints[i].Action == Enum.PathWaypointAction.Jump then
+					jumpSoon = true
+					break
+				end
+			end
+		end
+		if forward.Magnitude > 6 and remaining > 12 and nearWp > 5 and not jumpSoon then
+			local fade = math.min(math.clamp((remaining - 12) / 14, 0, 1), math.clamp((nearWp - 5) / 6, 0, 1))
+			local lateral = math.clamp(math.noise(self.seed, now * 0.38, 11.3) * 2, -1, 1) * self.amplitude * fade
+			local side = Vector3.new(-forward.Z, 0, forward.X).Unit
+			local candidate = point + side * lateral
+			if clearSegment(character, pos, candidate, refY) then
+				point = candidate
+			end
+		end
+		return point
+	end
+
+	function m:hop(humanoid, now, remaining)
+		if not self:enabled() or now < self.nextHop or remaining < 10 then
+			return
+		end
+		if humanoid.FloorMaterial == Enum.Material.Air or humanoid:GetState() == Enum.HumanoidStateType.Swimming then
+			return
+		end
+		if nearHazard(root.Position, 8) then
+			self.nextHop = now + 2
+			return
+		end
+		humanoid.Jump = true
+		if self.hopBurst > 0 then
+			self.hopBurst -= 1
+			self.nextHop = now + rand(0.45, 0.8)
+		elseif math.random() < 0.3 then
+			self.hopBurst = math.random(1, 3)
+			self.nextHop = now + rand(0.45, 0.8)
+		else
+			self.nextHop = now + rand(4, 11)
+		end
+	end
+
+	return m
+end
+
+-- Pemulihan stuck bertahap SEBELUM batas waktu / teleport:
+-- loncat beruntun -> melangkah menyamping -> rute ulang (ukuran agen lain) -> mundur sebentar -> memutar lewat arah terbuka (berulang).
+local function newRecovery(character, humanoid, root)
+	local r = {
+		level = 0,
+		sign = 1,
+		steerDir = nil,
+		steerUntil = 0,
+		detourPos = nil,
+		detourUntil = 0,
+		radiusBoost = 0,
+		forceRepath = false,
+		lastJump = -math.huge,
+		lastEscape = -math.huge,
+	}
+
+	function r:jump(now, gap)
+		if now - self.lastJump >= (gap or 0.8) and humanoid.FloorMaterial ~= Enum.Material.Air then
+			humanoid.Jump = true
+			self.lastJump = now
+			return true
+		end
+		return false
+	end
+
+	function r:sidestep(now, targetPos)
+		self.sign = -self.sign
+		local desired = flatten(targetPos - root.Position)
+		if desired.Magnitude < 0.1 then
+			desired = flatten(root.CFrame.LookVector)
+		end
+		local dir = findOpenDirection(character, root, desired, self.sign, true)
+		if not dir then
+			dir = -desired.Unit
+		end
+		self.steerDir = dir
+		self.steerUntil = now + 1.2
+	end
+
+	function r:backoff(now, targetPos)
+		local away = flatten(root.Position - targetPos)
+		if away.Magnitude < 0.1 then
+			away = -flatten(root.CFrame.LookVector)
+		end
+		self.sign = -self.sign
+		local dir = findOpenDirection(character, root, away, self.sign, false)
+		if dir then
+			self.steerDir = dir
+			self.steerUntil = now + 1.5
+		end
+	end
+
+	function r:detour(now)
+		local desired = CFrame.Angles(0, math.rad(math.random(0, 359)), 0):VectorToWorldSpace(Vector3.new(0, 0, -1))
+		self.sign = -self.sign
+		local dir = findOpenDirection(character, root, desired, self.sign, false)
+		if dir then
+			self.detourPos = root.Position + dir * rand(14, 22)
+			self.detourUntil = now + 5
+		end
+	end
+
+	-- frozen = detik tanpa bergeser (bidang datar).
+	function r:update(now, frozen, targetPos)
+		-- Tertanam di batu/dinding? Rute dan manuver menyamping tidak ada gunanya: langsung keluarkan.
+		if frozen >= 1.2 and now - self.lastEscape >= 2.5 and state.advanced.antiStuckEnabled then
+			self.lastEscape = now
+			if escapeEmbedded(character, humanoid, root, 0.9) then
+				self.level = 0
+				self.forceRepath = true
+				return
+			end
+		end
+		if frozen >= 0.6 then
+			self:jump(now, 0.45) -- spam loncat
+		end
+		local thresholds = { 1.6, 3, 4.6, 6.5 }
+		local nextLevel = self.level + 1
+		local needed = thresholds[nextLevel] or (6.5 + (nextLevel - #thresholds) * 3)
+		if frozen < needed then
+			return
+		end
+		self.level = nextLevel
+		if nextLevel == 1 then
+			self:sidestep(now, targetPos)
+		elseif nextLevel == 2 then
+			self.radiusBoost += 1
+			self.forceRepath = true
+			self:sidestep(now, targetPos)
+		elseif nextLevel == 3 then
+			self:backoff(now, targetPos)
+			self.forceRepath = true
+		elseif nextLevel == 4 then
+			self.radiusBoost += 1
+			self.forceRepath = true
+			self:detour(now)
+		else
+			self.radiusBoost += 1
+			self.forceRepath = true
+			if nextLevel % 2 == 0 then
+				self:detour(now)
+			else
+				self:backoff(now, targetPos)
+			end
+		end
+	end
+
+	-- Bergeser saja TIDAK mereset level: manuver menyamping/mundur sendiri menggeser karakter, sehingga
+	-- dulu level selalu kembali 0 dan karakter hanya menyamping kiri-kanan tanpa pernah rute ulang / memutar.
+	-- Level baru turun saat ada KEMAJUAN nyata (lihat onProgress).
+	function r:onMoved()
+	end
+
+	function r:onProgress()
+		self.level = 0
+	end
+
+	-- Titik paksa selama manuver pemulihan: (titik, freeRoam) atau nil.
+	function r:override(pos, now)
+		if self.steerDir and now < self.steerUntil then
+			return pos + self.steerDir * 8, false
+		end
+		if self.detourPos then
+			if now >= self.detourUntil or flatten(self.detourPos - pos).Magnitude < 3 then
+				self.detourPos = nil
+				self.forceRepath = true
+			else
+				return self.detourPos, true
+			end
+		end
+		return nil, false
+	end
+
+	return r
+end
+
+local function performWalk(slot, token, source)
+	local character, humanoid, root = waitForCharacter(8)
+	if not root then
+		return false, "Karakter belum siap. Perjalanan dibatalkan.", "warning"
+	end
+	if humanoid.Health <= 0 then
+		return false, "Karakter sedang mati. Perjalanan dibatalkan.", "warning"
+	end
+
+	local targetCF = slot.cf
+	local targetPos = targetCF.Position
+	if not isFinite(targetPos.X) or not isFinite(targetPos.Y) or not isFinite(targetPos.Z)
+		or targetPos.Y < Workspace.FallenPartsDestroyHeight + 5 then
+		return false, "Posisi tujuan tidak valid.", "error"
+	end
+
+	local function cancelled()
+		return state.closed or token ~= state.moveToken or player.Character ~= character
+			or not root.Parent or humanoid.Health <= 0
+	end
+
+	-- Sedang duduk? Berdiri dulu (tanpa loncat).
+	if isSeated(humanoid) then
+		setStatus("Karakter sedang duduk, berdiri dari kursi (tanpa loncat)...", "info")
+		leaveSeat(humanoid, cancelled)
+		if cancelled() then
+			return false, nil, nil
+		end
+	end
+
+	applyWalkSpeed(humanoid)
+
+	local goalPos = groundGoal(character, targetPos)
+	local startTime = os.clock()
+	local anchorPos = root.Position -- acuan "tidak bergeser" (hanya bidang datar)
+	local anchorTime = startTime
+	local progressTime = startTime -- terakhir kali ada kemajuan nyata
+	local bestDist = flatten(targetPos - root.Position).Magnitude
+	local waypoints = nil
+	local wpIndex = 2
+	local lastWpIndex = 2
+	local jumpedIndex = 0
+	local lastRepath = -math.huge
+	local forceRepath = false
+	local radiusBoost = 0
+	local noProgressLevel = 0
+	local rec = newRecovery(character, humanoid, root)
+	local mimic = newMimic(character, root)
+
+	while true do
+		if cancelled() then
+			return false, nil, nil
+		end
+		local now = os.clock()
+		local pos = root.Position
+		local toTarget = targetPos - pos
+		local flatDist = flatten(toTarget).Magnitude
+
+		if flatDist <= CONFIG.ArriveDistance and math.abs(toTarget.Y) <= 4 then
+			break
+		end
+
+		-- Duduk lagi di tengah jalan (mis. menyentuh kursi)? Berdiri (tanpa loncat).
+		if isSeated(humanoid) then
+			leaveSeat(humanoid, cancelled)
+			if cancelled() then
+				return false, nil, nil
+			end
+			anchorPos = root.Position
+			anchorTime = os.clock()
+			continue
+		end
+
+		-- Deteksi bergeser (frozen) dan kemajuan nyata (progress).
+		-- Hanya perpindahan DATAR yang dihitung: loncat di tempat tidak boleh mereset penghitung stuck.
+		if flatten(pos - anchorPos).Magnitude >= 1 or humanoid:GetState() == Enum.HumanoidStateType.Climbing then
+			anchorPos = pos
+			anchorTime = now
+			rec:onMoved()
+		end
+		if flatDist < bestDist - 2 or wpIndex > lastWpIndex then
+			bestDist = math.min(bestDist, flatDist)
+			lastWpIndex = wpIndex
+			progressTime = now
+			noProgressLevel = 0
+			radiusBoost = 0
+			rec.radiusBoost = 0
+			rec:onProgress()
+		end
+		local frozen = now - anchorTime
+		local noProgress = now - progressTime
+		local elapsed = now - startTime
+
+		-- Teleport = cadangan terakhir: hanya setelah batas waktu habis DAN (masih jauh ATAU nyangkut).
+		-- Jika sudah dekat dan masih terus bergerak, diberi tambahan waktu sampai batas mutlak.
+		-- Batas waktu & toggle diatur di tab Return (Teleport Otomatis).
+		local walkLimit = state.prefs.returnTpSeconds
+		if source == "npc" then
+			walkLimit = 30 -- gerak ala NPC: titik yang tak terjangkau cukup dilewati
+		end
+		if elapsed >= walkLimit then
+			local far = flatDist > CONFIG.FarDistance
+			local stuck = frozen >= CONFIG.StuckConfirm
+			if far or stuck or elapsed >= walkLimit * (CONFIG.WalkHardMax / CONFIG.WalkMaxTime) then
+				humanoid:MoveTo(root.Position)
+				if source == "npc" then
+					return false, nil, nil -- Mode NPC TIDAK pernah teleport; gagal diam-diam, lalu pilih titik lain
+				end
+				if not state.prefs.returnTpEnabled then
+					return false, string.format("Waktu jalan %d detik habis dan karakter belum sampai. Teleport otomatis OFF, perjalanan dihentikan.", walkLimit), "warning"
+				end
+				local ok, note, kind = teleportToSlot(slot, character, humanoid, root, token, source == "manual" or source == "npchome")
+				if ok then
+					return true, string.format("Batas waktu jalan %d detik habis dan karakter belum sampai (jauh/tersangkut), jadi dipindahkan langsung.", walkLimit), "warning"
+				end
+				return false, note, kind
+			end
+		end
+
+		-- Pemulihan bertahap saat tidak bergeser: spam loncat -> menyamping -> rute ulang -> mundur -> memutar.
+		rec:update(now, frozen, targetPos)
+		if rec.forceRepath then
+			rec.forceRepath = false
+			forceRepath = true
+			radiusBoost = rec.radiusBoost % 4
+		end
+
+		-- Bergerak tapi tidak maju (berputar-putar): rute ulang dengan ukuran agen berbeda, sesekali memutar.
+		if noProgress >= 10 * (noProgressLevel + 1) then
+			noProgressLevel += 1
+			radiusBoost = noProgressLevel % 3
+			forceRepath = true
+			if noProgressLevel % 2 == 0 then
+				rec:detour(now)
+			end
+		end
+
+		-- Hitung ulang rute secara berkala atau saat dipaksa.
+		if forceRepath or now - lastRepath >= (waypoints and 8 or 5) then
+			lastRepath = now
+			forceRepath = false
+			waypoints = computeWaypoints(root, humanoid, goalPos, radiusBoost)
+			wpIndex = 2
+			lastWpIndex = 2
+			jumpedIndex = 0
+			anchorTime = os.clock() -- waktu menghitung rute bukan "tersangkut"
+			continue
+		end
+
+		-- Tentukan titik tujuan langkah ini (manuver pemulihan lebih diutamakan daripada rute).
+		local moveTarget, freeRoam = rec:override(pos, now)
+		local pathAim = false
+		if not moveTarget then
+			if waypoints then
+				wpIndex = advanceWaypoints(character, waypoints, wpIndex, pos)
+				local waypoint = waypoints[wpIndex]
+				if waypoint then
+					moveTarget = waypoint.Position
+					pathAim = true
+					if waypoint.Action == Enum.PathWaypointAction.Jump and jumpedIndex ~= wpIndex then
+						jumpedIndex = wpIndex
+						rec:jump(now, 0.4)
+					end
+					-- Terdorong jauh dari rute: hitung ulang.
+					if flatten(moveTarget - pos).Magnitude > 16 and now - lastRepath >= 2 then
+						forceRepath = true
+					end
+				else
+					moveTarget = targetPos
+				end
+			else
+				moveTarget = targetPos
+				freeRoam = true
+			end
+		end
+
+		-- Gerak natural: potong tikungan, berkelok serong tipis, kecepatan bervariasi, loncat kecil acak.
+		local aimPoint = moveTarget
+		if pathAim then
+			aimPoint = mimic:aim(pos, moveTarget, waypoints, wpIndex, flatDist, now)
+			mimic:hop(humanoid, now, flatDist)
+			applySpeedFactor(mimic:speed(now))
+		end
+
+		-- Penghalang di depan: loncat jika rendah, cari arah terbuka jika tembok (tanpa rute).
+		local direction = flatten(aimPoint - pos)
+		if direction.Magnitude > 0.1 then
+			local low, high = checkObstacle(character, root, direction.Unit, humanoid)
+			if low and not high then
+				rec:jump(now, 0.6)
+			elseif low and high and freeRoam then
+				rec.sign = -rec.sign
+				local open = findOpenDirection(character, root, direction, rec.sign, true)
+				if open then
+					rec.steerDir = open
+					rec.steerUntil = now + 0.8
+				end
+			end
+		end
+
+		humanoid:MoveTo(aimPoint)
+		task.wait(0.1)
+	end
+
+	-- Pendekatan akhir ke titik yang tepat.
+	local finalDeadline = os.clock() + 2
+	while os.clock() < finalDeadline do
+		if cancelled() then
+			return false, nil, nil
+		end
+		if flatten(targetPos - root.Position).Magnitude <= 0.7 then
+			break
+		end
+		humanoid:MoveTo(targetPos)
+		task.wait(0.1)
+	end
+	if cancelled() then
+		return false, nil, nil
+	end
+
+	if source == "npc" then
+		return true, nil, nil -- Mode NPC: berhenti di tempat berhenti secara alami, tanpa "snap" posisi/arah
+	end
+
+	-- Koreksi kecil agar posisi dan arah hadap sama persis dengan yang disimpan.
+	if (root.Position - targetPos).Magnitude <= 3.5 then
+		root.CFrame = targetCF
+	else
+		root.CFrame = CFrame.new(root.Position) * (targetCF - targetCF.Position)
+	end
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+
+	if source == "manual" or source == "npchome" then
+		restoreSlotCamera(slot, targetCF, humanoid)
+	end
+
+	return true, nil, nil
+end
+
+moveToSavedSpot = function(slot, source)
+	if state.closed then
+		return false
+	end
+	if not slot then
+		notify("Pilih slot posisi terlebih dahulu.", "warning")
+		return false
+	end
+	if state.busy then
+		if source == "manual" then
+			notify("Perjalanan masih berjalan. Tekan Stop untuk membatalkan.", "info")
+		end
+		return false
+	end
+
+	state.busy = true
+	state.moveToken += 1
+	local token = state.moveToken
+	setStatus(string.format("Berjalan menuju \"%s\"...", slot.name), "info")
+	refreshUI()
+
+	local ok, success, message, kind = pcall(performWalk, slot, token, source)
+	restoreWalkSpeed()
+	state.busy = false
+
+	if state.closed then
+		return false
+	end
+	refreshUI()
+	if not ok then
+		state.autoPauseUntil = os.clock() + 5
+		notify("Perjalanan gagal karena error internal.", "error")
+		warn("[AutonomousSystem] performWalk error: " .. tostring(success))
+		return false
+	end
+	if success then
+		state.autoPauseUntil = os.clock() + 2
+		if source ~= "npc" then -- Mode NPC berjalan terus: tanpa toast tiap tiba
+			local prefix = source == "auto" and "Auto Return: tiba di" or "Tiba di"
+			notify(string.format("%s \"%s\".", prefix, slot.name), "success")
+			if message then
+				notify(message, "warning")
+			end
+		end
+		return true
+	end
+	-- Gagal/dibatalkan: beri jeda agar Auto Return tidak mengulang tanpa henti.
+	state.autoPauseUntil = os.clock() + 5
+	if message and source ~= "npc" then -- Mode NPC: gagal diam-diam (pilih titik lain), tanpa toast berulang
+		notify(message, kind or "warning")
+	end
+	return false
+end
+
+local function cancelMove()
+	if not state.busy then
+		return
+	end
+	state.moveToken += 1
+	state.autoPauseUntil = os.clock() + math.max(state.autoDelay, 3)
+	notify("Perjalanan dibatalkan.", "info")
+end
+
+toggleAutoReturn = function()
+	if state.closed then
+		return
+	end
+	if not state.autoReturn then
+		if not getSelectedSlot() then
+			notify("Pilih atau simpan slot dulu sebelum mengaktifkan Auto Return.", "warning")
+			return
+		end
+		state.autoReturn = true
+		state.autoPauseUntil = 0
+		persistSavedData()
+		refreshUI()
+		notify(string.format("Auto Return aktif. Karakter otomatis kembali ke slot terpilih jika bergeser lebih dari %.1f stud.", state.autoTrigger), "success")
+	else
+		state.autoReturn = false
+		persistSavedData()
+		refreshUI()
+		notify("Auto Return dimatikan.", "info")
+	end
+end
+
+-- Pemantau Auto Return: selama aktif, jika karakter berada lebih jauh dari "jarak deteksi" dari slot
+-- terpilih (karena respawn, terdorong, teleport game, dsb.), tunggu jeda lalu berjalan kembali
+-- dengan logika yang sama persis seperti tombol Return manual.
+local function runAutoReturnWatcher()
+	local awaySince = nil
+	local waitFor = 0
+	while not state.closed do
+		task.wait(CONFIG.WatchInterval)
+		if state.closed then
+			return
+		end
+
+		local findActive = state.find.running or state.find.scanning
+		local slot = (state.autoReturn and not state.busy and not findActive and not state.patrol.active and not state.npc.active and not state.deliverHold and serverAllowed()) and getSelectedSlot() or nil
+		local character, humanoid, root = nil, nil, nil
+		if slot then
+			character, humanoid, root = getCharacterParts()
+		end
+		if not slot or not character or not humanoid or not root or not root.Parent
+			or humanoid.Health <= 0 or not character:IsDescendantOf(Workspace) then
+			awaySince = nil
+			continue
+		end
+
+		local now = os.clock()
+		if now < state.autoPauseUntil then
+			awaySince = nil
+			continue
+		end
+
+		local distance = (root.Position - slot.cf.Position).Magnitude
+		if distance <= state.autoTrigger then
+			awaySince = nil
+		elseif not awaySince then
+			awaySince = now
+			local delaySeconds = state.autoDelay
+			if delaySeconds > 0 then
+				-- Jeda diacak +-20% agar tidak terlihat seperti pola tetap.
+				waitFor = delaySeconds * (0.8 + math.random() * 0.4)
+				notify(string.format("Auto Return: posisi bergeser %.1f stud, kembali ke \"%s\" dalam %.0f detik.", distance, slot.name, waitFor), "info")
+			else
+				waitFor = 0.3
+			end
+		elseif now - awaySince >= waitFor then
+			awaySince = nil
+			moveToSavedSpot(slot, "auto")
+		end
+	end
+end
+
+local function onCharacterRemoving()
+	state.moveToken += 1
+end
+
+--------------------------------------------------------------------------------
+-- FIND (cari item + jalan otomatis berurutan)
+--------------------------------------------------------------------------------
+
+-- Memecah nama objek jadi kata: "GoldCoin_12" -> { "gold", "coin" }.
+local function tokenize(name)
+	local spaced = name:gsub("(%l)(%u)", "%1 %2"):gsub("[^%a]+", " "):lower()
+	local tokens = {}
+	for word in spaced:gmatch("%S+") do
+		table.insert(tokens, word)
+	end
+	return tokens
+end
+
+-- Kata cocok jika sama persis (boleh +s), atau (jika diizinkan) menjadi awalan kata panjang ("golden").
+local function tokenHas(tokens, word, allowPrefix)
+	local wordLength = #word
+	for _, token in ipairs(tokens) do
+		if token == word or token == word .. "s" then
+			return true
+		end
+		if allowPrefix and wordLength >= 4 and #token > wordLength and token:sub(1, wordLength) == word then
+			return true
+		end
+	end
+	return false
+end
+
+local function matchName(name, matchers)
+	local lowered = name:lower()
+	local tokens = nil
+	for _, matcher in ipairs(matchers) do
+		for _, word in ipairs(matcher.words) do
+			if lowered:find(word, 1, true) then
+				if matcher.custom then
+					return matcher -- kata kunci manual: cukup mengandung teks tsb
+				end
+				tokens = tokens or tokenize(name)
+				if tokenHas(tokens, word, true) then
+					return matcher
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- Nama objek, atau nama Folder/Model induknya (mis. Workspace.Coins.Part).
+-- Pencocokan lewat Model induk hanya dipakai bila hasilnya wajib punya pemicu ambil (lihat buildEntry).
+local function matchInstance(inst, matchers, allowModelParent)
+	local matcher = matchName(inst.Name, matchers)
+	if matcher then
+		return matcher, false
+	end
+	local parent = inst.Parent
+	if parent and parent ~= Workspace then
+		local allowed = parent:IsA("Folder")
+			or (allowModelParent and parent:IsA("Model") and not parent:FindFirstChildOfClass("Humanoid"))
+		if allowed then
+			local parentMatcher = matchName(parent.Name, matchers)
+			if parentMatcher then
+				return parentMatcher, parent:IsA("Model") and "model" or "folder"
+			end
+		end
+	end
+	return nil, false
+end
+
+
+local function hazardName(name)
+	local lowered = name:lower()
+	local possible = false
+	for _, word in ipairs(HAZARD_WORDS) do
+		if lowered:find(word, 1, true) then
+			possible = true
+			break
+		end
+	end
+	if not possible then
+		return false
+	end
+	local tokens = tokenize(name)
+	for _, word in ipairs(HAZARD_WORDS) do
+		if tokenHas(tokens, word, false) then
+			return true
+		end
+	end
+	return false
+end
+
+local function isHazardInstance(inst)
+	if hazardName(inst.Name) then
+		return true
+	end
+	local parent = inst.Parent
+	if parent and parent ~= Workspace and (parent:IsA("Folder") or parent:IsA("Model")) then
+		return hazardName(parent.Name)
+	end
+	return false
+end
+
+-- Jarak titik ke kotak part (0 jika di dalam). Aman untuk part raksasa seperti lantai lava.
+local function distToPart(part, point)
+	local rel = part.CFrame:PointToObjectSpace(point)
+	local half = part.Size * 0.5
+	local dx = math.max(math.abs(rel.X) - half.X, 0)
+	local dy = math.max(math.abs(rel.Y) - half.Y, 0)
+	local dz = math.max(math.abs(rel.Z) - half.Z, 0)
+	return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+nearHazard = function(point, margin)
+	for _, part in ipairs(state.find.hazards) do
+		if part.Parent and distToPart(part, point) <= margin then
+			return true
+		end
+	end
+	return false
+end
+
+local function waypointsHitHazard(waypoints)
+	for _, waypoint in ipairs(waypoints) do
+		if nearHazard(waypoint.Position, CONFIG.HazardMargin) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Apakah titik ini berada di dalam voxel air Terrain.
+local function pointInWater(position)
+	local ok, result = pcall(function()
+		local terrain = Workspace.Terrain
+		local cell = terrain:WorldToCell(position)
+		local minCorner = cell * 4
+		local region = Region3.new(minCorner, minCorner + Vector3.new(4, 4, 4))
+		local materials, occupancy = terrain:ReadVoxels(region, 4)
+		return materials[1][1][1] == Enum.Material.Water and occupancy[1][1][1] > 0.2
+	end)
+	return ok and result == true
+end
+
+-- Apakah permukaan pertama di bawah titik adalah air (objek melayang di atas kolam/laut).
+local function waterBelow(position, exclude)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = exclude
+	params.IgnoreWater = false
+	local hit = Workspace:Raycast(position + Vector3.new(0, 1, 0), Vector3.new(0, -14, 0), params)
+	return hit ~= nil and hit.Material == Enum.Material.Water
+end
+
+local function groundBelow(position, exclude)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = exclude
+	params.RespectCanCollide = true
+	return Workspace:Raycast(position + Vector3.new(0, 1, 0), Vector3.new(0, -150, 0), params) ~= nil
+end
+
+local function parseKeywords(text)
+	local words, seen = {}, {}
+	for piece in tostring(text):gmatch("[^,;\n]+") do
+		local word = piece:match("^%s*(.-)%s*$"):lower()
+		if #word >= 2 and #word <= 24 and not seen[word] then
+			seen[word] = true
+			table.insert(words, word)
+			if #words >= CONFIG.FindMaxKeywords then
+				break
+			end
+		end
+	end
+	return words
+end
+
+local function buildMatchers()
+	local find = state.find
+	local matchers = {}
+	for _, category in ipairs(FIND_CATEGORIES) do
+		if find.categories[category.id] then
+			table.insert(matchers, { id = category.id, label = category.label, words = category.words })
+		end
+	end
+	local custom = parseKeywords(find.custom)
+	if #custom > 0 then
+		table.insert(matchers, { id = "custom", label = "Manual", words = custom, custom = true })
+	end
+	return matchers
+end
+
+local function isCoinOrGoldEntry(entry)
+	if entry.id == "coin" or entry.id == "gold" then
+		return true
+	end
+	local name = tostring(entry.name or ""):lower()
+	return name:find("coin", 1, true) ~= nil
+		or name:find("koin", 1, true) ~= nil
+		or name:find("gold", 1, true) ~= nil
+		or name:find("emas", 1, true) ~= nil
+end
+
+local function entryPosition(entry)
+	local visual = entry.visual
+	if visual and visual.Parent then
+		return visual.Position
+	end
+	local inst = entry.inst
+	if inst and inst.Parent and inst:IsA("Model") then
+		local ok, pivot = pcall(inst.GetPivot, inst)
+		if ok then
+			return pivot.Position
+		end
+	end
+	return nil
+end
+
+-- Target masih ada? (hilang / transparan penuh = sudah diambil)
+local function entryAlive(entry)
+	local inst = entry.inst
+	if not inst or not inst.Parent or not inst:IsDescendantOf(Workspace) then
+		return false
+	end
+	local visual = entry.visual
+	if visual then
+		if not visual.Parent or not visual:IsDescendantOf(Workspace) then
+			return false
+		end
+		if visual.Transparency >= CONFIG.FindMaxTransparency then
+			return false
+		end
+	end
+	return true
+end
+
+-- Objek di dalam target lain yang sudah terdaftar, atau di dalam karakter (pemain / NPC), diabaikan.
+local function insideBlocked(inst, registered)
+	local current = inst.Parent
+	while current and current ~= Workspace do
+		if registered[current] then
+			return true
+		end
+		if current:IsA("Model") and current:FindFirstChildOfClass("Humanoid") then
+			return true
+		end
+		current = current.Parent
+	end
+	return false
+end
+
+-- Pemicu yang membuat sebuah objek benar-benar BISA DIAMBIL: ProximityPrompt, ClickDetector,
+-- TouchInterest (Touched), atau Tool. Objek tanpa pemicu biasanya hanya dekorasi bernama "Gold".
+local function inspectTriggers(inst, kind)
+	local prompt, click, touch = false, false, false
+	local function inspect(object)
+		if object:IsA("ProximityPrompt") then
+			if object.Enabled then
+				prompt = true
+			end
+		elseif object:IsA("ClickDetector") then
+			click = true
+		elseif object:IsA("TouchTransmitter") then
+			touch = true
+		end
+	end
+	if kind == "part" then
+		for _, child in ipairs(inst:GetChildren()) do
+			inspect(child)
+		end
+	else
+		for _, descendant in ipairs(inst:GetDescendants()) do
+			inspect(descendant)
+		end
+	end
+	if kind == "tool" then
+		touch = true -- Tool diambil dengan menyentuh Handle
+	end
+	return prompt, click, touch
+end
+
+local function describeEntryType(entry)
+	local text = entry.kind == "tool" and "Tool" or (entry.kind == "model" and "Model" or "Part")
+	if entry.prompt then
+		text ..= "+Prompt"
+	end
+	if entry.click then
+		text ..= "+Click"
+	end
+	if entry.touch and entry.kind ~= "tool" then
+		text ..= "+Touch"
+	end
+	return text
+end
+
+local function entryHasTrigger(entry)
+	return entry.prompt == true or entry.click == true or entry.touch == true
+end
+
+local function buildEntry(inst, matcher, needTrigger)
+	local visual = nil
+	local kind = "part"
+	if inst:IsA("BasePart") then
+		local size = inst.Size
+		if math.max(size.X, size.Y, size.Z) > CONFIG.FindMaxSize then
+			return nil
+		end
+		if inst.Transparency >= CONFIG.FindMaxTransparency then
+			return nil
+		end
+		visual = inst
+	elseif inst:IsA("Tool") then
+		kind = "tool"
+		local handle = inst:FindFirstChild("Handle")
+		if not (handle and handle:IsA("BasePart")) then
+			handle = inst:FindFirstChildWhichIsA("BasePart", true)
+		end
+		if not handle or handle.Transparency >= CONFIG.FindMaxTransparency then
+			return nil
+		end
+		visual = handle
+	else
+		kind = "model"
+		if inst:FindFirstChildOfClass("Humanoid") then
+			return nil
+		end
+		local okSize, extents = pcall(inst.GetExtentsSize, inst)
+		if not okSize or math.max(extents.X, extents.Y, extents.Z) > CONFIG.FindMaxSize then
+			return nil
+		end
+		visual = inst.PrimaryPart
+		if not visual or visual.Transparency >= CONFIG.FindMaxTransparency then
+			visual = nil
+			for _, descendant in ipairs(inst:GetDescendants()) do
+				if descendant:IsA("BasePart") and descendant.Transparency < CONFIG.FindMaxTransparency then
+					visual = descendant
+					break
+				end
+			end
+		end
+		if not visual then
+			return nil
+		end
+	end
+
+	local position = visual.Position
+	if not isFinite(position.X) or not isFinite(position.Y) or not isFinite(position.Z) then
+		return nil
+	end
+	if position.Y < Workspace.FallenPartsDestroyHeight + 5 then
+		return nil
+	end
+
+	local prompt, click, touch = inspectTriggers(inst, kind)
+	if needTrigger and not (prompt or click or touch) then
+		return nil
+	end
+	local entry = {
+		inst = inst,
+		visual = visual,
+		name = string.sub(inst.Name, 1, 24),
+		id = matcher.id,
+		label = matcher.label,
+		kind = kind,
+		prompt = prompt,
+		click = click,
+		touch = touch,
+	}
+	entry.typeText = describeEntryType(entry)
+	return entry
+end
+
+local function isDuplicate(found, entry)
+	local position = entry.visual.Position
+	for _, other in ipairs(found) do
+		if (other.visual.Position - position).Magnitude < 1 then
+			return true
+		end
+	end
+	return false
+end
+
+local function describeCounts()
+	local find = state.find
+	local parts = {}
+	for _, matcher in ipairs(find.matchers) do
+		local count = find.counts[matcher.id] or 0
+		if count > 0 then
+			table.insert(parts, string.format("%s %d", matcher.label, count))
+		end
+	end
+	if #parts == 0 then
+		return "-"
+	end
+	return table.concat(parts, " • ")
+end
+
+-- Daftar kata dari teks pengaturan (pisah koma / titik koma / spasi): huruf kecil, tanpa duplikat.
+local function parseWordList(raw)
+	local words, seen = {}, {}
+	for word in tostring(raw or ""):lower():gmatch("[^,;%s]+") do
+		if not seen[word] then
+			seen[word] = true
+			table.insert(words, word)
+		end
+	end
+	return words
+end
+
+local function isBlacklisted(inst, words)
+	if #words == 0 then
+		return false
+	end
+	local name = inst.Name:lower()
+	for _, word in ipairs(words) do
+		if name:find(word, 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Prioritas kategori: kata pertama paling diutamakan. Bonus mengurangi "jarak" efektif (CONFIG.PriorityStep per peringkat).
+local priorityCache = { raw = nil, words = {} }
+local function priorityBonus(entry)
+	local raw = state.prefs.findPriority
+	if raw == "" then
+		return 0
+	end
+	if priorityCache.raw ~= raw then
+		priorityCache.raw = raw
+		priorityCache.words = parseWordList(raw)
+	end
+	local words = priorityCache.words
+	local name = tostring(entry.name):lower()
+	local label = tostring(entry.label or ""):lower()
+	for rank, word in ipairs(words) do
+		if entry.id == word or label == word or name:find(word, 1, true) then
+			return (#words - rank + 1) * CONFIG.PriorityStep
+		end
+	end
+	return 0
+end
+
+-- Memindai Workspace. Mengembalikan { entries, hazards, matchers, truncated } atau nil bila dibatalkan / tanpa kriteria.
+-- Hasil mentah mencakup SEMUA objek yang cocok nama; saringan tipe dipasang terpisah di applyFilters.
+local function scanTargets(token, silent)
+	local find = state.find
+	local matchers = buildMatchers()
+	if #matchers == 0 then
+		if not silent then
+			notify("Pilih minimal satu kategori atau isi kata kunci manual.", "warning")
+		end
+		return nil
+	end
+
+	local found, registered, hazards = {}, {}, {}
+	local truncated = false
+	local terrain = Workspace.Terrain
+	local scanHazards = find.avoidHazard
+	local allowModelParent = not find.triggers.plain
+	local blockWords = parseWordList(state.prefs.findBlacklist)
+	local list = Workspace:GetDescendants()
+	local viewCamera = Workspace.CurrentCamera -- visual lokal script (cincin jarak NPC) ada di sini: jangan ikut dipindai
+
+	for index, inst in ipairs(list) do
+		if index % 1000 == 0 then
+			task.wait() -- jangan bekukan game saat memindai peta besar
+			if state.closed or find.token ~= token then
+				return nil
+			end
+		end
+		if viewCamera and inst:IsDescendantOf(viewCamera) then
+			continue
+		end
+
+		local isPart = inst:IsA("BasePart")
+		if (isPart or inst:IsA("Model") or inst:IsA("Tool")) and inst ~= terrain then
+			if scanHazards and isPart and #hazards < 600 and isHazardInstance(inst) then
+				table.insert(hazards, inst)
+			end
+			if not truncated then
+				local matcher, viaParent = matchInstance(inst, matchers, allowModelParent)
+				if matcher and not isBlacklisted(inst, blockWords) and not insideBlocked(inst, registered) then
+					local entry = buildEntry(inst, matcher, viaParent == "model")
+					if entry and not isDuplicate(found, entry) then
+						registered[inst] = true
+						table.insert(found, entry)
+						if #found >= CONFIG.FindMaxRaw then
+							truncated = true
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return { entries = found, hazards = hazards, matchers = matchers, truncated = truncated }
+end
+
+-- Lolos saringan "Jenis objek" (Part/Model/Tool) dan "Pemicu ambil" (Prompt/Click/Touch/Tanpa pemicu)?
+local function passesTypeFilter(entry)
+	local find = state.find
+	if not find.kinds[entry.kind] then
+		return false
+	end
+	if not entryHasTrigger(entry) then
+		return find.triggers.plain == true
+	end
+	return (entry.prompt and find.triggers.prompt)
+		or (entry.click and find.triggers.click)
+		or (entry.touch and find.triggers.touch)
+		or false
+end
+
+-- Menyaring hasil mentah menjadi find.results + menghitung jumlah per kategori / jenis / pemicu.
+local function applyFilters()
+	local find = state.find
+	local results, counts = {}, {}
+	local kindCounts = { part = 0, model = 0, tool = 0 }
+	local trigCounts = { prompt = 0, click = 0, touch = 0, plain = 0 }
+	for _, entry in ipairs(find.raw) do
+		kindCounts[entry.kind] += 1
+		if entry.prompt then
+			trigCounts.prompt += 1
+		end
+		if entry.click then
+			trigCounts.click += 1
+		end
+		if entry.touch then
+			trigCounts.touch += 1
+		end
+		if not entryHasTrigger(entry) then
+			trigCounts.plain += 1
+		end
+		if passesTypeFilter(entry) and #results < CONFIG.FindMaxResults then
+			table.insert(results, entry)
+			counts[entry.id] = (counts[entry.id] or 0) + 1
+		end
+	end
+	find.results = results
+	find.counts = counts
+	find.kindCounts = kindCounts
+	find.trigCounts = trigCounts
+end
+
+local function applyScan(scan)
+	local find = state.find
+	find.raw = scan.entries
+	find.hazards = scan.hazards
+	find.matchers = scan.matchers
+	find.truncated = scan.truncated
+	find.scanned = true
+	applyFilters()
+end
+
+-- Alasan target tidak aman (sesuai toggle), atau nil jika aman.
+local function entryUnsafeReason(entry, character)
+	local find = state.find
+	local position = entryPosition(entry)
+	if not position then
+		return "gone"
+	end
+	local exclude = { character, entry.inst }
+	if find.avoidWater and (pointInWater(position) or waterBelow(position, exclude)) then
+		return "water"
+	end
+	if find.avoidHazard then
+		if nearHazard(position, CONFIG.HazardTargetMargin) or not groundBelow(position, exclude) then
+			return "hazard"
+		end
+	end
+	return nil
+end
+
+-- Titik tujuan untuk Pathfinding: permukaan padat tepat di bawah objek.
+local function pathGoal(character, entry, position)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character, entry.inst }
+	params.RespectCanCollide = true
+	local hit = Workspace:Raycast(position + Vector3.new(0, 2, 0), Vector3.new(0, -60, 0), params)
+	return hit and hit.Position or position
+end
+
+-- Beberapa game butuh interaksi (tekan E / klik); dipakai hanya jika executor menyediakan fungsinya.
+local function activateTarget(entry)
+	local inst = entry.inst
+	local find = state.find
+	local categoryId = entry.id
+
+	-- Untuk kata kunci manual, tebak kategori dari nama item agar toggle/keybind tetap berlaku.
+	if categoryId == "custom" then
+		local loweredName = tostring(entry.name or ""):lower()
+		for _, category in ipairs(FIND_CATEGORIES) do
+			if find.interactEnabled[category.id] then
+				for _, word in ipairs(category.words) do
+					if loweredName:find(word, 1, true) then
+						categoryId = category.id
+						break
+					end
+				end
+			end
+			if categoryId ~= "custom" then
+				break
+			end
+		end
+	end
+
+	-- Toggle kategori mengontrol seluruh auto-interaksi: keybind, ProximityPrompt, dan ClickDetector.
+	if not find.interactEnabled[categoryId] then
+		return
+	end
+	local interactionKey = find.interactKeys[categoryId]
+	if interactionKey and pressKey then
+		pressKey(interactionKey)
+	end
+	if type(fireproximityprompt) == "function" then
+		local prompt = inst:FindFirstChildWhichIsA("ProximityPrompt", true)
+		if prompt and prompt.Enabled then
+			pcall(fireproximityprompt, prompt)
+		end
+	end
+	if type(fireclickdetector) == "function" then
+		local detector = inst:FindFirstChildWhichIsA("ClickDetector", true)
+		if detector then
+			pcall(fireclickdetector, detector)
+		end
+	end
+end
+
+-- Teleport langsung ke objek (cadangan saat jalan tersangkut).
+local function teleportToTarget(entry, ctx, cancelled)
+	local humanoid, root = ctx.humanoid, ctx.root
+	local position = entryPosition(entry)
+	if not position then
+		return false
+	end
+	if humanoid.SeatPart then
+		humanoid.Sit = false
+		RunService.Heartbeat:Wait()
+	end
+	if cancelled() then
+		return false
+	end
+	local target = CFrame.new(position + Vector3.new(0, 2.5, 0)) * (root.CFrame - root.CFrame.Position)
+	root.CFrame = target
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	RunService.Heartbeat:Wait()
+	if cancelled() then
+		return false
+	end
+	root.CFrame = target
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- BAGIAN 2 (perbaikan error 5006 "Out of local registers")
+-- Luau membatasi 200 variabel local aktif per fungsi. v11 sudah 196, jadi fitur v12 melewatinya.
+-- Semua kode dari sini sampai akhir file dibungkus satu fungsi; variabel local bagian 1 tetap terlihat
+-- di dalamnya (sebagai upvalue) dan urutan eksekusi tidak berubah. Bila nanti menambah banyak local
+-- baru di bagian ini dan error yang sama muncul lagi, kelompokkan ke dalam tabel atau bungkus lagi.
+--------------------------------------------------------------------------------
+local function runPartTwo()
+
+--------------------------------------------------------------------------------
+-- PENDEKATAN TARGET: teleport berjarak, jalan, loncat, berenang, bolak-balik
+--------------------------------------------------------------------------------
+
+local function isSwimming(humanoid)
+	return humanoid:GetState() == Enum.HumanoidStateType.Swimming
+end
+
+-- Loncat (dengan jeda antar-loncatan) hanya bila karakter menapak.
+local function ctxJump(ctx)
+	local now = os.clock()
+	if now - (ctx.lastJump or -math.huge) >= 0.8 and ctx.humanoid.FloorMaterial ~= Enum.Material.Air then
+		ctx.humanoid.Jump = true
+		ctx.lastJump = now
+	end
+end
+
+-- Item Coin/Gold boleh dikejar dengan lompatan hanya bila toggle "Jump Coin/Gold" aktif.
+local function shouldJumpFor(entry)
+	return not isCoinOrGoldEntry(entry) or state.find.jumpHighCoinGold
+end
+
+-- Berenang 3D ke titik tujuan (naik/turun mengikuti item). Karakter otomatis mengapung ke permukaan,
+-- jadi kecepatan diatur langsung tiap frame agar bisa menyelam ke arah item.
+local function swimStep(ctx, destination)
+	local humanoid, root = ctx.humanoid, ctx.root
+	local toTarget = destination - root.Position
+	local distance = toTarget.Magnitude
+	if distance < 0.4 then
+		return
+	end
+	local speed = math.max(16, humanoid.WalkSpeed)
+	root.AssemblyLinearVelocity = toTarget.Unit * math.min(speed, distance * 8 + 4)
+	humanoid:MoveTo(Vector3.new(destination.X, root.Position.Y, destination.Z))
+end
+
+local STANDOFF_ANGLES = { 0, 35, -35, 70, -70, 110, -110, 150, -150, 180 }
+
+-- Titik berdiri/berenang "distance" stud dari item (bukan tepat di item). Di darat: permukaan padat dan aman.
+-- Di air: titik di dalam air pada kedalaman item. Mengembalikan Vector3 atau nil.
+local function pickStandoff(entry, ctx, distance)
+	local find = state.find
+	local itemPos = entryPosition(entry)
+	if not itemPos then
+		return nil
+	end
+	local character, root = ctx.character, ctx.root
+	local underwater = pointInWater(itemPos)
+
+	-- Arah awal: dari item menuju posisi karakter sekarang (sisi yang paling mungkin terjangkau).
+	local away = flatten(root.Position - itemPos)
+	if away.Magnitude < 1 then
+		away = Vector3.new(0, 0, 1)
+	end
+	away = away.Unit
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character, entry.inst }
+	params.RespectCanCollide = true
+	local waterFreeParams = RaycastParams.new()
+	waterFreeParams.FilterType = Enum.RaycastFilterType.Exclude
+	waterFreeParams.FilterDescendantsInstances = { character, entry.inst }
+	waterFreeParams.RespectCanCollide = true
+	waterFreeParams.IgnoreWater = true
+
+	for _, angle in ipairs(STANDOFF_ANGLES) do
+		local direction = CFrame.Angles(0, math.rad(angle), 0):VectorToWorldSpace(away)
+		local flat = itemPos + direction * distance
+		if underwater then
+			local point = Vector3.new(flat.X, itemPos.Y, flat.Z)
+			if pointInWater(point) and not Workspace:Raycast(itemPos, point - itemPos, waterFreeParams) then
+				return point
+			end
+		else
+			local origin = Vector3.new(flat.X, itemPos.Y + 3, flat.Z)
+			local hit = Workspace:Raycast(origin, Vector3.new(0, -60, 0), params)
+			if hit and hit.Material ~= Enum.Material.Water and math.abs(hit.Position.Y - itemPos.Y) <= 30 then
+				local ground = hit.Position
+				if not (find.avoidHazard and nearHazard(ground, CONFIG.HazardTargetMargin)) then
+					local safe = resolveSafeCFrame(CFrame.new(ground + Vector3.new(0, 3, 0)), character, root)
+					if safe then
+						return safe.Position
+					end
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- Teleport ke sebuah titik (menghadap ke arah item).
+local function teleportToPoint(point, ctx, cancelled, faceTo)
+	local humanoid, root = ctx.humanoid, ctx.root
+	if humanoid.SeatPart then
+		humanoid.Sit = false
+		RunService.Heartbeat:Wait()
+	end
+	if cancelled() then
+		return false
+	end
+	local look = faceTo and flatten(faceTo - point) or Vector3.zero
+	local target
+	if look.Magnitude > 0.1 then
+		target = CFrame.lookAt(point, point + look)
+	else
+		target = CFrame.new(point) * (root.CFrame - root.CFrame.Position)
+	end
+	root.CFrame = target
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	RunService.Heartbeat:Wait()
+	if cancelled() then
+		return false
+	end
+	root.CFrame = target
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	return true
+end
+
+-- Bolak-balik melewati item (depan-belakang lalu kiri-kanan) supaya tersentuh/terambil.
+-- Mengembalikan false bila dibatalkan.
+local function sweepAround(entry, ctx, cancelled, duration)
+	local find = state.find
+	local humanoid, root = ctx.humanoid, ctx.root
+	local position = entryPosition(entry)
+	if not position then
+		return true
+	end
+	local axis = flatten(root.Position - position)
+	if axis.Magnitude < 0.5 then
+		axis = flatten(root.CFrame.LookVector)
+	end
+	if axis.Magnitude < 0.01 then
+		axis = Vector3.new(0, 0, 1)
+	end
+	axis = axis.Unit
+	local perpendicular = Vector3.new(-axis.Z, 0, axis.X)
+	local offsets = { -axis * 3, axis * 3, -perpendicular * 3, perpendicular * 3 }
+	local index = 0
+	local deadline = os.clock() + duration
+
+	while os.clock() < deadline and entryAlive(entry) do
+		index = index % #offsets + 1
+		local legEnd = os.clock() + 0.7
+		while os.clock() < legEnd and entryAlive(entry) do
+			if cancelled() then
+				return false
+			end
+			local itemPos = entryPosition(entry)
+			if not itemPos then
+				return true
+			end
+			local waypoint = itemPos + offsets[index]
+			if isSwimming(humanoid) and not find.avoidWater then
+				swimStep(ctx, Vector3.new(waypoint.X, itemPos.Y, waypoint.Z))
+				RunService.Heartbeat:Wait()
+			else
+				humanoid:MoveTo(Vector3.new(waypoint.X, root.Position.Y, waypoint.Z))
+				if itemPos.Y - root.Position.Y > 1.5 and shouldJumpFor(entry) then
+					ctxJump(ctx)
+				end
+				task.wait(0.1)
+			end
+		end
+	end
+	return true
+end
+
+-- Satu percobaan mendekati target.
+-- Status: "collected" | "visited" | "gone" | "cancelled" | "stuck" (+alasan) | "far" (+alasan)
+-- Saat mentok: pemulihan bertahap (spam loncat, menyamping, rute ulang, mundur, memutar) dijalankan DULU;
+-- status "stuck" baru dikembalikan setelah CONFIG.FindStuckTime detik tanpa bergeser.
+local function approachOnce(entry, ctx, cancelled, timeout)
+	local find = state.find
+	local character, humanoid, root = ctx.character, ctx.humanoid, ctx.root
+
+	if not entryAlive(entry) then
+		return "gone"
+	end
+	local targetPos = entryPosition(entry)
+	if not targetPos then
+		return "gone"
+	end
+
+	local safeOnly = find.avoidWater or find.avoidHazard
+	local routeOptions = {
+		avoidWater = find.avoidWater,
+		validate = find.avoidHazard and function(waypoints)
+			return not waypointsHitHazard(waypoints)
+		end or nil,
+	}
+	local waterTarget = pointInWater(targetPos)
+
+	local startTime = os.clock()
+	local anchorPos = root.Position
+	local anchorTime = startTime
+	local progressTime = startTime
+	local bestDist = flatten(targetPos - root.Position).Magnitude
+	local metricIn3D = false
+	local waypoints = nil
+	local wpIndex, lastWpIndex, jumpedIndex = 2, 2, 0
+	local lastRepath = -math.huge
+	local forceRepath = false
+	local pathFails = 0
+	local radiusBoost = 0
+	local freeRoam = false
+	local swimSince = nil
+	local noProgressStage = 0
+	local rec = newRecovery(character, humanoid, root)
+	local mimic = newMimic(character, root)
+
+	-- Fase 1: menuju target lewat rute (loncat / berenang), sampai dekat.
+	while true do
+		if cancelled() then
+			return "cancelled"
+		end
+		if not entryAlive(entry) then
+			return (root.Position - targetPos).Magnitude <= 8 and "collected" or "gone"
+		end
+		targetPos = entryPosition(entry)
+		if not targetPos then
+			return "gone"
+		end
+
+		local now = os.clock()
+		local pos = root.Position
+		local toTarget = targetPos - pos
+		local flatDist = flatten(toTarget).Magnitude
+		local swimmingNow = isSwimming(humanoid)
+		local swimTo = swimmingNow and not find.avoidWater -- berenang ke item
+		local retreat = swimmingNow and find.avoidWater -- keluar dari air
+
+		-- Coin/Gold yang berada di atas karakter: lompat saat sudah cukup dekat.
+		if find.jumpHighCoinGold
+			and not swimmingNow
+			and isCoinOrGoldEntry(entry)
+			and targetPos.Y - pos.Y >= CONFIG.FindHighItemJumpHeight
+			and flatDist <= CONFIG.FindHighItemJumpDistance then
+			ctxJump(ctx)
+		end
+
+		local arrived
+		if swimTo or waterTarget then
+			arrived = toTarget.Magnitude <= CONFIG.FindArriveDistance
+		else
+			arrived = flatDist <= CONFIG.FindArriveDistance and math.abs(toTarget.Y) <= 6
+		end
+		if arrived then
+			break
+		end
+
+		-- Duduk di tengah jalan? Berdiri (tanpa loncat).
+		if isSeated(humanoid) then
+			leaveSeat(humanoid, cancelled)
+			if cancelled() then
+				return "cancelled"
+			end
+			anchorPos = root.Position
+			anchorTime = os.clock()
+			continue
+		end
+
+		-- Masuk air saat "Hindari Air" aktif: kembali ke titik aman terakhir.
+		if retreat then
+			swimSince = swimSince or now
+		else
+			swimSince = nil
+			local floor = humanoid.FloorMaterial
+			if not swimmingNow and floor ~= Enum.Material.Air and floor ~= Enum.Material.Water then
+				ctx.lastSafe = pos
+			end
+		end
+
+		-- Deteksi tidak bergeser (frozen) dan kemajuan nyata (progress).
+		-- Bergeser = perpindahan DATAR >= 1 stud (loncat di tempat tidak mereset penghitung). Saat berenang, jarak 3D yang dihitung.
+		local moved
+		if swimmingNow then
+			moved = (pos - anchorPos).Magnitude >= 1
+		else
+			moved = flatten(pos - anchorPos).Magnitude >= 1 or humanoid:GetState() == Enum.HumanoidStateType.Climbing
+		end
+		if moved then
+			anchorPos = pos
+			anchorTime = now
+			rec:onMoved()
+		end
+		local metric = swimTo and toTarget.Magnitude or flatDist
+		if swimTo ~= metricIn3D then
+			metricIn3D = swimTo
+			bestDist = metric
+			progressTime = now
+		end
+		if metric < bestDist - 2 or wpIndex > lastWpIndex then
+			bestDist = math.min(bestDist, metric)
+			lastWpIndex = wpIndex
+			progressTime = now
+			noProgressStage = 0
+			radiusBoost = 0
+			rec.radiusBoost = 0
+			rec:onProgress()
+		end
+		local frozen = now - anchorTime
+		local noProgress = now - progressTime
+		local elapsed = now - startTime
+
+		local why = nil
+		if frozen >= CONFIG.FindStuckTime then
+			why = "tersangkut"
+		elseif swimSince and now - swimSince >= 3 then
+			why = "terjebak di air"
+		elseif noProgress >= CONFIG.FindNoProgressTime then
+			why = "tidak bisa maju"
+		elseif elapsed >= (timeout or CONFIG.FindTargetTimeout) then
+			why = "waktu habis"
+		elseif pathFails >= 2 and safeOnly and not waypoints and not waterTarget then
+			why = "rute aman tidak ada"
+		end
+		if why then
+			humanoid:MoveTo(root.Position)
+			return "stuck", why
+		end
+
+		-- Pemulihan bertahap saat mentok (di air tidak berlaku).
+		if not swimTo and not retreat then
+			rec:update(now, frozen, targetPos)
+			if rec.forceRepath then
+				rec.forceRepath = false
+				forceRepath = true
+				freeRoam = false
+				pathFails = 0
+				radiusBoost = rec.radiusBoost % 4
+			end
+			-- Bergerak tapi tidak mendekat: buat jalur lain lebih awal daripada menunggu batas waktu.
+			if noProgress >= 5 and noProgressStage == 0 then
+				noProgressStage = 1
+				forceRepath = true
+				freeRoam = false
+				radiusBoost = (radiusBoost + 1) % 4
+				rec:detour(now)
+			elseif noProgress >= 9 and noProgressStage == 1 then
+				noProgressStage = 2
+				forceRepath = true
+				freeRoam = false
+				radiusBoost = (radiusBoost + 1) % 4
+				rec:backoff(now, targetPos)
+			end
+		end
+
+		-- Hitung / hitung ulang rute (tidak dibutuhkan saat berenang langsung ke item).
+		if not freeRoam and not swimTo and (forceRepath or now - lastRepath >= (waypoints and 6 or 0.6)) then
+			lastRepath = now
+			forceRepath = false
+			local newWaypoints = computeWaypoints(root, humanoid, pathGoal(character, entry, targetPos), radiusBoost, routeOptions)
+			if newWaypoints then
+				waypoints = newWaypoints
+				wpIndex, lastWpIndex, jumpedIndex = 2, 2, 0
+				pathFails = 0
+			elseif not waypoints then
+				pathFails += 1
+				radiusBoost = (radiusBoost + 1) % 3
+				-- Tanpa toggle keamanan (atau target di air), boleh jalan/berenang lurus.
+				if pathFails >= 2 and (not safeOnly or waterTarget) then
+					freeRoam = true
+				end
+			end
+			anchorTime = os.clock() -- waktu menghitung rute bukan "tersangkut"
+			continue
+		end
+
+		-- Tentukan titik tujuan langkah ini.
+		local moveTarget = nil
+		local pathAim = false
+		if retreat then
+			moveTarget = ctx.lastSafe
+			humanoid.Jump = true
+		elseif not swimTo then
+			moveTarget = rec:override(pos, now) -- manuver pemulihan (menyamping / mundur / memutar) lebih diutamakan
+		end
+		if not moveTarget then
+			if waypoints then
+				wpIndex = advanceWaypoints(character, waypoints, wpIndex, pos)
+				local waypoint = waypoints[wpIndex]
+				if waypoint then
+					moveTarget = waypoint.Position
+					pathAim = true
+					if waypoint.Action == Enum.PathWaypointAction.Jump and jumpedIndex ~= wpIndex then
+						jumpedIndex = wpIndex
+						ctxJump(ctx)
+					end
+					-- Terdorong jauh dari rute: hitung ulang.
+					if flatten(moveTarget - pos).Magnitude > 16 and now - lastRepath >= 2 then
+						forceRepath = true
+					end
+				else
+					moveTarget = targetPos
+				end
+			elseif freeRoam then
+				moveTarget = targetPos
+			end
+		end
+
+		if swimTo then
+			-- Item di air: berenang lurus ke item (naik/turun). Item di darat: ikuti titik rute.
+			swimStep(ctx, (waterTarget and targetPos) or moveTarget or targetPos)
+			RunService.Heartbeat:Wait()
+			continue
+		end
+
+		if moveTarget then
+			-- Gerak natural: potong tikungan, berkelok serong tipis, kecepatan bervariasi, loncat kecil acak.
+			local aimPoint = moveTarget
+			if pathAim then
+				aimPoint = mimic:aim(pos, moveTarget, waypoints, wpIndex, flatDist, now)
+				mimic:hop(humanoid, now, flatDist)
+				applySpeedFactor(mimic:speed(now))
+			end
+
+			-- Penghalang rendah di depan: loncat.
+			local direction = flatten(aimPoint - pos)
+			if direction.Magnitude > 0.1 then
+				local low, high = checkObstacle(character, root, direction.Unit, humanoid)
+				if low and not high then
+					ctxJump(ctx)
+				end
+			end
+			humanoid:MoveTo(aimPoint)
+		end
+		task.wait(0.1)
+	end
+
+	-- Fase 2: pendekatan akhir sampai menyentuh item (melompat / berenang bila perlu).
+	local finalDeadline = os.clock() + CONFIG.FindFinalTime + ((waterTarget or isSwimming(humanoid)) and 3 or 0)
+	while os.clock() < finalDeadline do
+		if cancelled() then
+			return "cancelled"
+		end
+		if not entryAlive(entry) then
+			break
+		end
+		local position = entryPosition(entry)
+		if not position then
+			break
+		end
+		if (root.Position - position).Magnitude <= 2.5 then
+			break
+		end
+		if isSwimming(humanoid) and not find.avoidWater then
+			swimStep(ctx, position)
+			RunService.Heartbeat:Wait()
+		else
+			humanoid:MoveTo(position)
+			if position.Y - root.Position.Y > 2 and shouldJumpFor(entry) then
+				ctxJump(ctx)
+			end
+			task.wait(0.1)
+		end
+	end
+	if cancelled() then
+		return "cancelled"
+	end
+
+	-- Fase 3: sudah dekat tapi item belum terambil -> interaksi, lalu bolak-balik melewati item.
+	if entryAlive(entry) then
+		local position = entryPosition(entry)
+		if position and (root.Position - position).Magnitude <= 8 then
+			activateTarget(entry)
+			if not sweepAround(entry, ctx, cancelled, CONFIG.FindSweepTime) then
+				return "cancelled"
+			end
+		end
+	end
+	task.wait(0.2)
+	if cancelled() then
+		return "cancelled"
+	end
+
+	if entryAlive(entry) then
+		local position = entryPosition(entry)
+		if position and (root.Position - position).Magnitude > 4.5 then
+			return "far", "tidak terjangkau"
+		end
+		activateTarget(entry)
+		task.wait(0.25)
+	end
+	return entryAlive(entry) and "visited" or "collected"
+end
+
+-- Berjalan ke satu target.
+-- Bila tersangkut / tidak terjangkau: teleport BERJARAK (bukan tepat di item) lalu bergerak lagi, maksimal
+-- CONFIG.FindStandoffRetries kali. Teleport langsung ke item hanya cadangan paling akhir.
+-- Mengembalikan: status ("collected" | "visited" | "gone" | "cancelled"), teleported, alasan.
+local function findWalkTo(entry, ctx, cancelled)
+	local find = state.find
+	local teleported, lastReason = false, nil
+	local retries = 0
+	local timeout = state.prefs.findTpSeconds
+
+	while true do
+		local status, why = approachOnce(entry, ctx, cancelled, timeout)
+		if status ~= "stuck" and status ~= "far" then
+			return status, teleported, lastReason
+		end
+		if cancelled() then
+			return "cancelled", teleported, lastReason
+		end
+		local targetPos = entryPosition(entry)
+		if not targetPos or not entryAlive(entry) then
+			return "gone", teleported, lastReason
+		end
+
+		retries += 1
+		if not state.prefs.findTpEnabled then
+			-- Teleport otomatis OFF: target ini dilewati, karakter tidak dipindahkan.
+			return "skipped", teleported, tostring(why)
+		end
+		if retries <= CONFIG.FindStandoffRetries then
+			local distance = math.max(CONFIG.FindStandoffMin, find.standoff * (0.6 ^ retries))
+			local point = pickStandoff(entry, ctx, distance)
+			if point and teleportToPoint(point, ctx, cancelled, targetPos) then
+				teleported, lastReason = true, why
+				timeout = math.min(CONFIG.FindRetryTimeout, state.prefs.findTpSeconds)
+				task.wait(0.3)
+				continue
+			end
+			if cancelled() then
+				return "cancelled", teleported, lastReason
+			end
+		end
+
+		-- Cadangan terakhir: semua percobaan berjarak gagal.
+		if not teleportToTarget(entry, ctx, cancelled) then
+			return cancelled() and "cancelled" or "gone", teleported, lastReason
+		end
+		task.wait(0.5)
+		if cancelled() then
+			return "cancelled", true, why
+		end
+		activateTarget(entry)
+		task.wait(0.2)
+		return entryAlive(entry) and "visited" or "collected", true, tostring(why) .. ", teleport langsung"
+	end
+end
+
+-- Mode Teleport: lompat ke titik berjarak dari item, lalu bergerak/berenang/loncat ke item seperti mode jalan.
+local function teleportApproach(entry, ctx, cancelled)
+	local find = state.find
+	if not entryAlive(entry) then
+		return "gone", false
+	end
+	local targetPos = entryPosition(entry)
+	if not targetPos then
+		return "gone", false
+	end
+	local teleported = false
+	local point = pickStandoff(entry, ctx, find.standoff)
+		or pickStandoff(entry, ctx, math.max(CONFIG.FindStandoffMin, find.standoff * 0.5))
+	if point and teleportToPoint(point, ctx, cancelled, targetPos) then
+		teleported = true
+		task.wait(0.35) -- biarkan karakter mendarat / mulai berenang sebelum bergerak
+	elseif cancelled() then
+		return "cancelled", false
+	end
+	local status, walkTeleported, reason = findWalkTo(entry, ctx, cancelled)
+	if teleported and not reason then
+		reason = string.format("mode teleport, jarak %d stud", find.standoff)
+	end
+	return status, teleported or walkTeleported, reason
+end
+
+-- Rejoin server: item habis, Coin/Gold gagal, timer manual, putus internet, stall, batas sesi, ping, server browser.
+-- target: "same" (JobId yang sama; satu-satunya yang masuk akal untuk server private), "any" (Teleport biasa),
+--		 "hop" (server publik lain dari daftar), "job" (server pilihan di Server browser: state.server.pendingJob).
+-- force = true melewati penjaga "permintaan sedang berjalan" (dipakai auto-reconnect yang mengulang).
+local rejoinRequested = false
+local rejoinRequestedAt = 0
+-- userChoice = true: pindah server itu pilihan eksplisit pengguna (Quick Join / lanjutan Hop), jadi tidak dikunci.
+local function requestServerRejoin(reason, resumeFindAfterTeleport, forcedTarget, force, userChoice)
+	if state.closed then
+		return false
+	end
+	if rejoinRequested and not force and os.clock() - rejoinRequestedAt < 45 then
+		return false
+	end
+	-- Rejoin otomatis dari Find melanjutkan Find setelah teleport; rejoin manual tidak memulai Find
+	-- secara tak terduga kecuali Find memang sedang berjalan saat tombol/timer dipicu.
+	if resumeFindAfterTeleport == nil then
+		resumeFindAfterTeleport = state.find.running or state.find.scanning
+	end
+	rejoinRequested = true
+	rejoinRequestedAt = os.clock()
+	local requestStamp = rejoinRequestedAt
+	state.rejoin.manualToken += 1
+	state.rejoin.manualActive = false
+	state.rejoin.manualEndsAt = 0
+	if ui.refreshRejoin then ui.refreshRejoin() end
+	state.find.token += 1
+	state.moveToken += 1
+	state.find.running = false
+	state.find.scanning = false
+	state.busy = false
+	state.patrol.active = false
+	state.patrol.token += 1
+	restoreWalkSpeed()
+	state.stats.rejoins += 1
+	persistSavedData()
+	if state.advanced.autoExecuteEnabled then
+		local queued, queueMessage = queueAutoExecute(resumeFindAfterTeleport)
+		if not queued then
+			notify("Autoexecute belum bisa disiapkan: " .. tostring(queueMessage), "warning")
+		end
+	end
+	notify(reason or "Mencoba rejoin server...", "warning")
+	state.hooks.fire("rejoin", reason or "Rejoin server")
+
+	-- Percobaan ulang otomatis ke server yang sama (lihat state.hooks.teleportFailed) tidak mereset penghitungnya.
+	if state.server.sameRetryInFlight then
+		state.server.sameRetryInFlight = false
+	else
+		state.server.sameRetries = 0
+	end
+
+	local serverType = detectServerType()
+	local target = forcedTarget or state.prefs.rejoinTarget
+	-- Kunci server sama (v12.4): SEMUA rejoin (Rejoin Now, timer manual, Auto Rejoin Find, auto reconnect, stall, ping,
+	-- batas sesi) kembali ke JobId ini dan tidak pernah jatuh ke server lain. Aksi 'Hop' otomatis ikut diganti.
+	-- Hanya pilihan eksplisit pengguna (Quick Join / Join Terpilih) yang boleh pindah server.
+	local locked = state.prefs.rejoinSameLock and not userChoice and target ~= "job"
+	if locked and target ~= "same" then
+		if target == "hop" then
+			ui.addLog("Kunci server sama aktif: aksi Hop diganti rejoin ke server yang sama.", "info", "Server")
+		end
+		target = "same"
+	end
+	if serverType ~= "public" and target ~= "job" then
+		target = "same" -- Teleport biasa dari server private membawa ke server publik; JobId yang sama dipertahankan
+	end
+	state.server.lastTarget = target
+	state.server.lastResume = resumeFindAfterTeleport
+	if locked and target == "same" and #Players:GetPlayers() <= 1 then
+		ui.addLog("Kamu sendirian di server ini: Roblox menutup server saat pemain terakhir keluar, jadi rejoin ke server yang sama bisa ditolak. Script tidak pindah ke server lain karena Kunci server sama ON.", "warning", "Server")
+	end
+
+	local ok, err = false, nil
+	if target == "job" then
+		ok, err = state.server.joinJob(state.server.pendingJob)
+	else
+		if target == "hop" then
+			ok, err = state.server.hopTeleport()
+			if not ok then
+				ui.addLog("Hop gagal (" .. tostring(err) .. "), memakai rejoin biasa.", "warning", "Server")
+				target = "any"
+			end
+		end
+		if not ok and target == "same" then
+			ok, err = pcall(function()
+				TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+			end)
+			if not ok and serverType == "public" and not locked then
+				target = "any" -- server yang sama penuh/tidak tersedia: coba server lain (hanya bila Kunci server sama OFF)
+			end
+		end
+		if not ok and target == "any" then
+			ok, err = pcall(function()
+				TeleportService:Teleport(game.PlaceId, player)
+			end)
+			if not ok then
+				-- Beberapa executor membungkus signature Teleport secara berbeda.
+				ok, err = pcall(function()
+					TeleportService:Teleport(game.PlaceId)
+				end)
+			end
+		end
+	end
+	if not ok then
+		rejoinRequested = false
+		notify("Rejoin gagal dimulai: " .. tostring(err) .. (locked and " (Kunci server sama aktif: tidak pindah ke server lain.)" or ""), "error")
+		return false
+	end
+
+	-- Bila teleport tidak pernah terjadi (jaringan macet / gagal diam-diam), buka kembali penjaga setelah 45 dtk.
+	spawnTask(function()
+		task.wait(45)
+		if not state.closed and rejoinRequested and rejoinRequestedAt == requestStamp then
+			rejoinRequested = false
+			notify("Teleport belum berpindah setelah 45 detik. Permintaan rejoin direset, silakan coba lagi.", "warning")
+			if ui.refreshRejoin then ui.refreshRejoin() end
+		end
+	end)
+	return true
+end
+
+state.rejoin.parseMinutes = function(raw)
+	if type(raw) ~= "string" then return nil, "Isi durasi rejoin dengan angka menit." end
+	local value = raw:match("^%s*(.-)%s*$")
+	if value == "" or not value:match("^%d+$") then
+		return nil, "Durasi rejoin harus berupa angka bulat dalam menit."
+	end
+	local minutes = tonumber(value)
+	if not minutes or minutes < CONFIG.ManualRejoinMinMinutes or minutes > CONFIG.ManualRejoinMaxMinutes then
+		return nil, string.format("Durasi rejoin harus %d–%d menit.", CONFIG.ManualRejoinMinMinutes, CONFIG.ManualRejoinMaxMinutes)
+	end
+	return minutes
+end
+
+state.rejoin.stopTimer = function(showToast)
+	state.rejoin.manualToken += 1
+	local wasActive = state.rejoin.manualActive or state.rejoin.manualRepeat
+	state.rejoin.manualActive = false
+	state.rejoin.manualRepeat = false -- berhenti total: tidak dihitung ulang lagi setelah rejoin
+	state.rejoin.manualEndsAt = 0
+	persistSavedData()
+	if ui.refreshRejoin then ui.refreshRejoin() end
+	if showToast and wasActive then notify("Timer rejoin manual dihentikan (tidak dihitung ulang lagi).", "info") end
+end
+
+-- silent = true: dipulihkan otomatis (setelah rejoin / re-arm), memakai menit tersimpan tanpa membaca kotak teks.
+state.rejoin.startTimer = function(silent)
+	if state.closed then return end
+	local minutes = state.rejoin.manualMinutes
+	if not silent then
+		local raw = ui.rejoinMinutesBox and ui.rejoinMinutesBox.Text or tostring(state.rejoin.manualMinutes)
+		local parsed, err = state.rejoin.parseMinutes(raw)
+		if not parsed then
+			notify(err, "warning")
+			return
+		end
+		minutes = parsed
+	end
+	state.rejoin.manualMinutes = minutes
+	state.rejoin.manualToken += 1
+	local token = state.rejoin.manualToken
+	state.rejoin.manualActive = true
+	state.rejoin.manualRepeat = true -- berulang: setiap rejoin dihitung ulang dari awal sampai Stop Timer
+	state.rejoin.manualEndsAt = os.clock() + minutes * 60
+	persistSavedData()
+	if ui.refreshRejoin then ui.refreshRejoin() end
+	if not silent then
+		notify(string.format("Timer rejoin dimulai (berulang): rejoin tiap %d menit, dihitung ulang setelah setiap rejoin sampai kamu menekan Stop Timer.", minutes), "success")
+		if not state.advanced.autoExecuteEnabled then
+			notify("Autoexecute script OFF: setelah rejoin, timer hanya lanjut bila executor-mu menjalankan script ini otomatis (folder autoexec). Tanpa itu, timer baru aktif lagi saat script dijalankan manual.", "warning")
+		end
+	end
+	spawnTask(function()
+		while not state.closed and state.rejoin.manualActive and state.rejoin.manualToken == token do
+			local remaining = state.rejoin.manualEndsAt - os.clock()
+			if remaining <= 0 then break end
+			if ui.refreshRejoin then ui.refreshRejoin() end
+			task.wait(math.min(1, remaining))
+		end
+		if state.closed or not state.rejoin.manualActive or state.rejoin.manualToken ~= token then return end
+		state.rejoin.manualActive = false
+		state.rejoin.manualEndsAt = 0
+		if ui.refreshRejoin then ui.refreshRejoin() end
+		requestServerRejoin("Timer rejoin manual selesai.")
+	end)
+end
+
+-- Skor "terdekat": jarak 3D, ditambah penalti kecil untuk item yang jauh di atas karakter (butuh memanjat).
+local function entryScore(entry, pos)
+	local position = entryPosition(entry)
+	if not position then
+		return math.huge
+	end
+	local delta = position - pos
+	return delta.Magnitude + math.max(0, delta.Y - 4) * 2 - priorityBonus(entry)
+end
+
+-- Indeks item terdekat dari posisi sekarang, atau nil bila tidak ada yang valid.
+local function pickNearest(queue, pos)
+	local bestIndex, bestScore = nil, math.huge
+	for index, entry in ipairs(queue) do
+		local score = entryScore(entry, pos)
+		if score < bestScore then
+			bestIndex, bestScore = index, score
+		end
+	end
+	return bestIndex
+end
+
+-- Satu sesi Find: scan -> hitung -> saring (air/bahaya) -> ambil yang TERDEKAT dulu.
+-- Setelah tiap item selesai (diambil / dilewati) scan diulang supaya item yang sudah diambil pemain lain
+-- hilang dari antrean dan item baru ikut terdata; item terdekat dari posisi terakhir dipilih lagi.
+local function runFindSession(token, scanOnly)
+	local find = state.find
+
+	find.statusText = "Memindai peta..."
+	refreshFindUI()
+	local scan = scanTargets(token)
+	if not scan then
+		find.statusText = "Scan dibatalkan."
+		refreshFindUI()
+		return
+	end
+	if state.closed or find.token ~= token then
+		return
+	end
+	applyScan(scan)
+	refreshResultList()
+	rebuildESP()
+
+	local total = #find.results
+	local counts = describeCounts()
+	if total > 0 or #find.raw > 0 then state.rejoin.emptyScanStreak = 0 end
+	if total == 0 then
+		if not scanOnly and state.rejoin.autoWhenEmpty and state.rejoin.sessionCollected and #find.matchers > 0 and #find.raw == 0 then
+			state.rejoin.emptyScanStreak += 1
+			if not find.loopEnabled or state.rejoin.emptyScanStreak >= CONFIG.FindEmptyRejoinScans then
+				local reason = string.format("Tidak ada target yang tersisa setelah pengumpulan item (%d scan kosong). Mencoba rejoin server...", state.rejoin.emptyScanStreak)
+				find.statusText = reason
+				refreshFindUI()
+				requestServerRejoin(reason)
+				return
+			end
+		end
+		local rawTotal = #find.raw
+		if rawTotal > 0 then
+			find.statusText = string.format("%d objek cocok nama, tapi tidak lolos filter tipe (cek chip Jenis / Pemicu).", rawTotal)
+		elseif find.loopEnabled and not scanOnly then
+			find.statusText = "Loop Find: belum ada target; akan scan ulang."
+		else
+			find.statusText = "Tidak ada target ditemukan."
+		end
+		refreshFindUI()
+		if not (find.loopEnabled and not scanOnly) then
+			if rawTotal > 0 then
+				notify(string.format("%d objek cocok nama tapi bukan item yang bisa diambil. Aktifkan \"Tanpa pemicu\" bila perlu.", rawTotal), "warning")
+			else
+				notify("Tidak ada target ditemukan. Coba kategori lain atau kata kunci manual.", "warning")
+			end
+		end
+		return
+	end
+	find.statusText = string.format("Scan: %d target • %s", total, counts)
+	refreshFindUI()
+	if not find.loopEnabled or scanOnly then
+		notify(string.format("Ditemukan %d target: %s.", total, counts), "success")
+	end
+	if find.truncated and (not find.loopEnabled or scanOnly) then
+		notify(string.format("Hasil mentah dibatasi %d objek pertama.", CONFIG.FindMaxRaw), "info")
+	end
+	if scanOnly then
+		return
+	end
+
+	if state.busy then
+		notify("Perjalanan Return sedang berjalan. Tekan Stop dulu, lalu mulai Find.", "warning")
+		return
+	end
+	task.wait(1) -- beri waktu membaca jumlah target sebelum mulai berjalan
+	if state.closed or find.token ~= token then
+		return
+	end
+
+	local character, humanoid, root = waitForCharacter(8)
+	if not root then
+		notify("Karakter belum siap. Find dibatalkan.", "warning")
+		return
+	end
+
+	-- Target yang gagal diambil di sesi ini tidak dicoba lagi (mencegah mengulang item yang sama terus-menerus).
+	find.failed = {}
+	local safeCache = {}
+
+	-- Saring hasil scan sesuai toggle air / bahaya + daftar gagal. Mengembalikan antrean + rincian yang dilewati,
+	-- atau nil bila Find dibatalkan saat menyaring.
+	local function buildQueue(results)
+		local queue = {}
+		local skipped = { water = 0, hazard = 0, gone = 0, failed = 0 }
+		for index, entry in ipairs(results) do
+			if index % 20 == 0 then
+				task.wait()
+				if state.closed or find.token ~= token then
+					return nil
+				end
+			end
+			if find.failed[entry.inst] then
+				skipped.failed += 1
+			else
+				-- Hasil cek air/bahaya disimpan per item agar scan ulang tiap item tetap ringan.
+				local reason = safeCache[entry.inst]
+				if reason == nil then
+					reason = entryUnsafeReason(entry, character) or false
+					safeCache[entry.inst] = reason
+				end
+				if reason then
+					skipped[reason] += 1
+				else
+					table.insert(queue, entry)
+				end
+			end
+		end
+		return queue, skipped
+	end
+
+	local queue, skipped = buildQueue(find.results)
+	if not queue then
+		return
+	end
+	local skippedTotal = skipped.water + skipped.hazard + skipped.gone
+	if #queue == 0 then
+		find.statusText = find.loopEnabled and "Loop Find: tidak ada target aman; scan ulang." or "Semua target dilewati (air/bahaya)."
+		refreshFindUI()
+		if not find.loopEnabled then
+			notify("Semua target dilewati karena berada di air/dekat bahaya.", "warning")
+		end
+		return
+	end
+	if skippedTotal > 0 and not find.loopEnabled then
+		notify(string.format("Dilewati %d target (air %d, bahaya %d, hilang %d). Berjalan ke %d target.", skippedTotal, skipped.water, skipped.hazard, skipped.gone, #queue), "info")
+	end
+
+	-- Scan/filter selesai; tidak ada jeda tanpa tombol Stop sebelum mulai berjalan.
+	find.scanning = false
+	-- Mulai berjalan.
+	find.running = true
+	state.busy = true
+	state.moveToken += 1
+	local moveToken = state.moveToken
+	find.total = #queue
+	find.done, find.collected, find.visited, find.gone, find.teleports = 0, 0, 0, 0, 0
+	refreshUI()
+
+	local function cancelled()
+		return state.closed or find.token ~= token or moveToken ~= state.moveToken
+			or player.Character ~= character or not root.Parent or humanoid.Health <= 0
+	end
+
+	if isSeated(humanoid) then
+		setStatus("Karakter sedang duduk, berdiri dari kursi (tanpa loncat)...", "info")
+		leaveSeat(humanoid, cancelled)
+	end
+	applyWalkSpeed(humanoid, find.speedPct)
+
+	local ctx = { character = character, humanoid = humanoid, root = root, lastSafe = root.Position }
+	local order = 0
+	local interrupted = false
+
+	-- Scan ulang penuh (item yang sudah diambil orang lain hilang, item baru muncul) lalu bangun antrean baru.
+	-- Mengembalikan antrean baru, atau nil bila scan tidak bisa dijalankan (antrean lama dipertahankan).
+	local function rescanQueue()
+		local fresh = scanTargets(token, true)
+		if cancelled() then
+			return nil
+		end
+		if not fresh then
+			return nil
+		end
+		applyScan(fresh)
+		refreshResultList()
+		rebuildESP()
+		return (buildQueue(find.results))
+	end
+
+	while #queue > 0 do
+		if cancelled() then
+			interrupted = true
+			break
+		end
+
+		-- Urutan: selalu target TERDEKAT dari posisi karakter saat ini.
+		local index = pickNearest(queue, root.Position)
+		if not index then
+			break
+		end
+		local entry = table.remove(queue, index)
+		order += 1
+		find.statusText = string.format("Berjalan %d/%d: %s \"%s\"", order, find.total, entry.label, entry.name)
+		setStatus(find.statusText, "info")
+		refreshFindUI()
+
+		local status, teleported, reason
+		if find.mode == "teleport" then
+			status, teleported, reason = teleportApproach(entry, ctx, cancelled)
+		else
+			status, teleported, reason = findWalkTo(entry, ctx, cancelled)
+		end
+		if status == "cancelled" or cancelled() then
+			interrupted = true
+			break
+		end
+
+		-- Mulai hitung waktu koleksi SETELAH proses pendekatan selesai, bukan sebelum perjalanan.
+		-- Dengan demikian perjalanan jauh tidak menghabiskan jatah 15 detik untuk konfirmasi pickup.
+		local skippedFlag = status == "skipped"
+		local collectDeadline = os.clock() + CONFIG.FindCollectTimeout
+		while status ~= "gone" and status ~= "skipped" and entryAlive(entry) and os.clock() < collectDeadline do
+			if cancelled() then
+				interrupted = true
+				break
+			end
+			activateTarget(entry)
+			local targetPos = entryPosition(entry)
+			if targetPos and (root.Position - targetPos).Magnitude > 5 then
+				-- Terdorong menjauh: dekati lagi (loncat / berenang tetap berlaku).
+				local retryStatus = findWalkTo(entry, ctx, cancelled)
+				if retryStatus == "cancelled" then
+					interrupted = true
+					break
+				end
+			else
+				-- Dekat tapi belum terambil: bolak-balik melewati item.
+				if not sweepAround(entry, ctx, cancelled, 1.5) then
+					interrupted = true
+					break
+				end
+			end
+			task.wait(0.2)
+		end
+		if interrupted then break end
+		if not entryAlive(entry) then
+			status = "collected"
+		elseif status ~= "gone" then
+			-- Limit tercapai: baru sekarang target dianggap gagal dan dilewati.
+			status = "visited"
+			find.failed[entry.inst] = true
+			find.statusText = string.format("%s: \"%s\" belum terambil, lanjut target berikutnya.", skippedFlag and "Tidak terjangkau (teleport otomatis OFF)" or "Timeout 15 dtk", entry.name)
+			setStatus(find.statusText, "warning")
+		end
+
+		find.done += 1
+		if status == "collected" then
+			find.collected += 1
+			state.stats.collected += 1
+		elseif status == "visited" then
+			find.visited += 1
+		else
+			find.gone += 1
+		end
+
+		-- Coin/Gold yang masih ada tetapi gagal dikoleksi (status "visited") dihitung.
+		-- Coin/Gold yang berhasil diambil mereset hitungan berturut-turut.
+		if status == "collected" then
+			state.rejoin.sessionCollected = true
+			find.failedPickupStreak = 0
+		elseif status == "visited" then
+			find.failedPickupStreak += 1
+			if state.rejoin.autoWhenEmpty and find.failedPickupStreak >= CONFIG.FindFailedPickupRejoinLimit then
+				find.statusText = string.format("%d target berturut-turut gagal diambil; mencoba rejoin server...", CONFIG.FindFailedPickupRejoinLimit)
+				refreshFindUI()
+				requestServerRejoin(find.statusText)
+				return
+			end
+		end
+		if entry.id == "coin" or entry.id == "gold" then
+			if status == "collected" then
+				find.failedCoinSkips = 0
+			elseif status == "visited" then
+				find.failedCoinSkips += 1
+				if state.rejoin.autoWhenEmpty and find.failedCoinSkips >= CONFIG.FindFailedCoinRejoinLimit then
+					find.statusText = string.format("%d Coin/Gold berturut-turut gagal diambil; mencoba rejoin server...", CONFIG.FindFailedCoinRejoinLimit)
+					refreshFindUI()
+					requestServerRejoin(find.statusText)
+					return
+				end
+			end
+		end
+
+		if teleported then
+			find.teleports += 1
+			notify(string.format("Teleport berjarak ke dekat \"%s\" (%s).", entry.name, reason or "mode teleport"), "warning")
+		end
+
+		-- Hook setelah tiap item (batas sesi, setor/deliver): boleh meminta sesi berhenti.
+		if state.hooks.afterItem then
+			local verdict = state.hooks.afterItem(ctx, cancelled, moveToken)
+			if verdict == "stop" or cancelled() then
+				interrupted = true
+				break
+			end
+		end
+
+		-- Scan ulang setelah tiap item: buang yang sudah diambil pemain lain, tambah yang baru muncul.
+		if find.rescanEachItem then
+			find.statusText = string.format("Scan ulang setelah \"%s\"...", entry.name)
+			refreshFindUI()
+			local fresh = rescanQueue()
+			if cancelled() then
+				interrupted = true
+				break
+			end
+			if fresh then
+				queue = fresh
+			end
+		end
+		-- Apa pun hasil scan, item yang sudah hilang tidak boleh tetap di antrean.
+		for i = #queue, 1, -1 do
+			if not entryAlive(queue[i]) or find.failed[queue[i].inst] then
+				table.remove(queue, i)
+			end
+		end
+		find.total = find.done + #queue
+		refreshFindUI()
+	end
+
+	-- Bila rescan tiap item OFF, verifikasi kondisi peta sekali sebelum menyimpulkan semua target habis.
+	if not interrupted and not find.rescanEachItem and not state.closed and find.token == token then
+		local fresh = scanTargets(token, true)
+		if fresh and not state.closed and find.token == token then
+			applyScan(fresh)
+			refreshResultList()
+			rebuildESP()
+		end
+	end
+
+	if not interrupted and not find.loopEnabled and state.rejoin.autoWhenEmpty and state.rejoin.sessionCollected and #find.matchers > 0 and #find.raw == 0 then
+		find.statusText = "Semua target yang dipilih sudah habis/tidak terlihat. Mencoba rejoin server..."
+		refreshFindUI()
+		requestServerRejoin(find.statusText)
+		return
+	end
+
+	find.deathInterrupt = interrupted and not state.closed and find.token == token
+		and (humanoid.Health <= 0 or player.Character ~= character or not root.Parent)
+
+	local summary = string.format(
+		"%d/%d diproses • diambil %d • disentuh %d • hilang %d • teleport %d",
+		find.done, find.total, find.collected, find.visited, find.gone, find.teleports
+	)
+	if interrupted then
+		find.statusText = "Find berhenti: " .. summary
+		if not state.closed then
+			notify("Find berhenti: " .. summary .. ".", "info")
+		end
+	elseif find.loopEnabled then
+		find.statusText = "Loop Find: ronde selesai (" .. summary .. "); scan ulang sebentar lagi."
+	else
+		find.statusText = "Find selesai: " .. summary
+		notify("Find selesai: " .. summary .. ".", "success")
+	end
+
+	-- Daftar hasil tetap ditampilkan (item yang sudah terambil otomatis hilang dari daftar / ESP).
+	find.hazards = {}
+	refreshResultList()
+	rebuildESP()
+end
+
+stopFind = function()
+	local find = state.find
+	if state.closed or not (find.running or find.scanning) then
+		return
+	end
+	find.token += 1
+	if find.running then
+		state.moveToken += 1
+		state.autoPauseUntil = os.clock() + math.max(state.autoDelay, 3)
+	end
+	notify("Find dihentikan.", "info")
+end
+
+startFind = function(scanOnly)
+	local find = state.find
+	if state.closed or find.running or find.scanning then
+		return
+	end
+	if not scanOnly and not serverAllowed() then
+		notify(string.format("Find dijeda: server ini %s, sedangkan Mode server = %s.", effectiveServerType(), state.prefs.serverMode), "warning")
+		return
+	end
+	if not scanOnly and state.busy then
+		notify("Perjalanan Return sedang berjalan. Tekan Stop dulu, lalu mulai Find.", "warning")
+		return
+	end
+
+	if ui.findBox then
+		find.custom = sanitizeKeywords(ui.findBox.Text)
+	end
+	if #buildMatchers() == 0 then
+		notify("Pilih minimal satu kategori atau isi kata kunci manual.", "warning")
+		return
+	end
+	persistSavedData()
+
+	find.token += 1
+	local token = find.token
+	if not scanOnly then
+		find.failedCoinSkips = 0
+		find.failedPickupStreak = 0
+		state.rejoin.sessionCollected = false
+		state.rejoin.emptyScanStreak = 0
+	end
+	find.scanning = true
+	refreshUI()
+
+	spawnTask(function()
+		while not state.closed and find.token == token do
+			find.deathInterrupt = false
+			local ok, err = pcall(runFindSession, token, scanOnly)
+			local wasRunning = find.running
+			find.scanning = false
+			find.running = false
+			if wasRunning then
+				restoreWalkSpeed()
+				state.busy = false
+				state.autoPauseUntil = os.clock() + 2
+			end
+			if state.closed then
+				return
+			end
+			if not ok then
+				warn("[AutonomousSystem] Find error: " .. tostring(err))
+				find.statusText = "Find gagal karena error internal."
+				notify("Find gagal karena error internal.", "error")
+				break
+			end
+			refreshUI()
+			if scanOnly or find.token ~= token then
+				break
+			end
+			-- Karakter mati saat Find berjalan: tunggu respawn lalu lanjutkan (Pengaturan > Lanjut setelah respawn).
+			local resumeDeath = find.deathInterrupt == true and state.prefs.resumeAfterDeath and serverAllowed()
+			find.deathInterrupt = false
+			if not find.loopEnabled and not resumeDeath then
+				break
+			end
+
+			-- Selama jeda, Find tetap berstatus aktif agar tombol Stop dapat membatalkan.
+			find.scanning = true
+			if resumeDeath then
+				find.statusText = "Karakter mati. Find dilanjutkan setelah respawn..."
+				refreshUI()
+				waitForCharacter(30)
+				task.wait(2)
+			else
+				find.statusText = "Loop Find: scan berikutnya dalam " .. string.format("%.1f", CONFIG.FindLoopDelay) .. " dtk..."
+				refreshUI()
+				task.wait(CONFIG.FindLoopDelay)
+			end
+			if state.closed or find.token ~= token or (not find.loopEnabled and not resumeDeath) then
+				break
+			end
+		end
+
+		find.scanning = false
+		find.running = false
+		if not state.closed then
+			refreshUI()
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- ANTI-AFK
+--------------------------------------------------------------------------------
+
+local function stopAntiAFK(message, kind)
+	if not state.afk.active then
+		return
+	end
+	state.afk.active = false
+	state.afk.token += 1
+	if ui.afkCountdown then
+		ui.afkCountdown.Text = "Tekan berikutnya: --:--"
+	end
+	persistSavedData()
+	refreshUI()
+	notify(message or "Anti-AFK dimatikan.", kind or "info")
+end
+
+local function runAfkTimer(token)
+	while not state.closed and state.afk.active and state.afk.token == token do
+		local remaining = state.afk.endsAt - os.clock()
+		if remaining <= 0 then
+			-- Interval habis: tekan keybind lalu ulangi sampai Anti-AFK dimatikan.
+			state.afk.endsAt = os.clock() + state.afk.minutes * 60
+			local keyName = state.afk.keyCode.Name
+			if not serverAllowed() then
+				ui.addLog("Anti-AFK dilewati: tipe server tidak sesuai Mode server.", "info", "Server")
+			elseif pressKey(state.afk.keyCode) then
+				notify(string.format("Anti-AFK: tombol %s ditekan. Berikutnya %d menit lagi.", keyName, state.afk.minutes), "info")
+			else
+				notify("Anti-AFK gagal menekan tombol (input virtual tidak tersedia).", "warning")
+			end
+		else
+			if ui.afkCountdown then
+				ui.afkCountdown.Text = "Tekan berikutnya: " .. formatTime(remaining)
+			end
+			refreshStatus()
+		end
+		task.wait(0.5)
+	end
+end
+
+local function startAntiAFK(minutes)
+	state.afk.minutes = minutes
+	state.afk.active = true
+	state.afk.token += 1
+	state.afk.endsAt = os.clock() + minutes * 60
+	local token = state.afk.token
+	persistSavedData()
+	refreshUI()
+	spawnTask(runAfkTimer, token)
+end
+
+local function applyDuration(showSuccess)
+	local minutes, reason = validateDuration(ui.durationBox and ui.durationBox.Text or "")
+	if not minutes then
+		if ui.durationStroke then
+			ui.durationStroke.Color = THEME.Error
+		end
+		notify(reason, "warning")
+		return nil
+	end
+	if ui.durationStroke then
+		ui.durationStroke.Color = THEME.Border
+	end
+	state.afk.minutes = minutes
+	persistSavedData()
+	if state.afk.active then
+		state.afk.endsAt = os.clock() + minutes * 60
+	end
+	refreshUI()
+	if showSuccess then
+		notify(string.format("Interval Anti-AFK diset ke %d menit.", minutes), "success")
+	end
+	return minutes
+end
+
+pressKey = function(keyCode)
+	local focused = UserInputService:GetFocusedTextBox()
+	if focused then
+		focused:ReleaseFocus()
+	end
+	local sent = pcall(function()
+		local vim = game:GetService("VirtualInputManager")
+		vim:SendKeyEvent(true, keyCode, false, game)
+		task.wait(0.12)
+		vim:SendKeyEvent(false, keyCode, false, game)
+	end)
+	if sent then
+		return true
+	end
+	if keyCode == Enum.KeyCode.Space then
+		local _, humanoid = getCharacterParts()
+		if humanoid then
+			humanoid.Jump = true
+			return true
+		end
+	end
+	return false
+end
+
+toggleAntiAFK = function()
+	if state.closed then
+		return
+	end
+	if state.afk.active then
+		stopAntiAFK("Anti-AFK dimatikan.", "info")
+		return
+	end
+	local minutes = applyDuration(false)
+	if not minutes then
+		return
+	end
+	startAntiAFK(minutes)
+	notify(string.format("Anti-AFK aktif: menekan %s tiap %d menit.", state.afk.keyCode.Name, minutes), "success")
+	spawnTask(function()
+		task.wait(0.4)
+		if state.closed or not state.afk.active then
+			return
+		end
+		local keyName = state.afk.keyCode.Name
+		if pressKey(state.afk.keyCode) then
+			notify(string.format("Tes: tombol %s ditekan. Lihat apakah karakter bereaksi.", keyName), "info")
+		else
+			notify("Tombol tidak bisa ditekan otomatis di lingkungan ini (input virtual tidak tersedia).", "warning")
+		end
+	end)
+end
+
+local function onIdled()
+	if state.closed or not state.afk.active or not serverAllowed() then
+		return
+	end
+	local ok = pcall(function()
+		VirtualUser:CaptureController()
+		VirtualUser:ClickButton2(Vector2.new(0, 0))
+	end)
+	if not ok and not state.afk.vuWarned then
+		state.afk.vuWarned = true
+		notify("Anti-AFK gagal mengirim input virtual di lingkungan ini.", "error")
+	end
+end
+
+local function beginKeyCapture()
+	if state.closed then
+		return
+	end
+	state.capturingFindKey = nil
+	state.capturingKey = true
+	refreshUI()
+	notify("Tekan tombol keyboard untuk keybind baru (Esc untuk batal).", "info")
+end
+
+local BLOCKED_KEYS = {
+	[Enum.KeyCode.W] = true,
+	[Enum.KeyCode.A] = true,
+	[Enum.KeyCode.S] = true,
+	[Enum.KeyCode.D] = true,
+	[Enum.KeyCode.Up] = true,
+	[Enum.KeyCode.Down] = true,
+	[Enum.KeyCode.Left] = true,
+	[Enum.KeyCode.Right] = true,
+	[Enum.KeyCode.Return] = true,
+	[Enum.KeyCode.Unknown] = true,
+}
+
+local MOVE_KEYS = {
+	[Enum.KeyCode.W] = true,
+	[Enum.KeyCode.A] = true,
+	[Enum.KeyCode.S] = true,
+	[Enum.KeyCode.D] = true,
+	[Enum.KeyCode.Up] = true,
+	[Enum.KeyCode.Down] = true,
+	[Enum.KeyCode.Left] = true,
+	[Enum.KeyCode.Right] = true,
+}
+
+local function onInputBegan(input, processed)
+	if state.closed or input.UserInputType ~= Enum.UserInputType.Keyboard then
+		return
+	end
+	if UserInputService:GetFocusedTextBox() then
+		return
+	end
+
+	if state.capturingPref then
+		local prefKey = state.capturingPref
+		state.capturingPref = nil
+		if input.KeyCode == Enum.KeyCode.Escape then
+			refreshUI()
+			notify("Pengaturan tombol dibatalkan.", "info")
+			return
+		end
+		if (input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete) and PREF_DEFS[prefKey] and PREF_DEFS[prefKey].d == "" then
+			setPref(prefKey, "")
+			persistSavedData()
+			refreshUI()
+			notify("Tombol dikosongkan.", "info")
+			return
+		end
+		if BLOCKED_KEYS[input.KeyCode] then
+			refreshUI()
+			notify("Tombol itu dipakai untuk kontrol gerak. Pilih tombol lain.", "warning")
+			return
+		end
+		setPref(prefKey, input.KeyCode.Name)
+		persistSavedData()
+		refreshUI()
+		notify(string.format("Tombol diset ke %s.", input.KeyCode.Name), "success")
+		return
+	end
+
+	if state.capturingFindKey then
+		local categoryId = state.capturingFindKey
+		state.capturingFindKey = nil
+		if input.KeyCode == Enum.KeyCode.Escape then
+			refreshFindUI()
+			notify("Pengaturan keybind kategori dibatalkan.", "info")
+			return
+		end
+		if BLOCKED_KEYS[input.KeyCode] then
+			refreshFindUI()
+			notify("Tombol itu dipakai untuk kontrol gerak. Pilih tombol lain, misalnya E atau F.", "warning")
+			return
+		end
+		state.find.interactKeys[categoryId] = input.KeyCode
+		persistSavedData()
+		refreshFindUI()
+		local label = categoryId
+		for _, category in ipairs(FIND_CATEGORIES) do
+			if category.id == categoryId then
+				label = category.label
+				break
+			end
+		end
+		notify(string.format("Keybind interaksi %s diset ke %s.", label, input.KeyCode.Name), "success")
+		return
+	end
+
+	if state.capturingKey then
+		state.capturingKey = false
+		if input.KeyCode == Enum.KeyCode.Escape then
+			refreshUI()
+			notify("Pengaturan keybind dibatalkan.", "info")
+			return
+		end
+		if BLOCKED_KEYS[input.KeyCode] then
+			refreshUI()
+			notify("Tombol itu dipakai untuk kontrol game. Pilih tombol lain.", "warning")
+			return
+		end
+		state.afk.keyCode = input.KeyCode
+		persistSavedData()
+		refreshUI()
+		notify(string.format("Keybind Anti-AFK diset ke %s.", input.KeyCode.Name), "success")
+		return
+	end
+
+	if processed then
+		return
+	end
+	if state.hooks.hotkey and state.hooks.hotkey(input) then
+		return
+	end
+	if MOVE_KEYS[input.KeyCode] and state.npc.active then
+		state.npc.stop("Mode NPC dihentikan karena kamu menggerakkan karakter.")
+		return
+	end
+	if MOVE_KEYS[input.KeyCode] and (state.find.running or state.find.scanning) then
+		stopFind()
+		return
+	end
+	if state.busy and MOVE_KEYS[input.KeyCode] then
+		cancelMove()
+	end
+end
+
+--------------------------------------------------------------------------------
+-- TOAST NOTIFICATIONS
+--------------------------------------------------------------------------------
+
+local pumpToasts
+
+local function runToast(item)
+	local color = KIND_COLOR[item.kind] or THEME.Info
+	local glyph = KIND_GLYPH[item.kind] or "i"
+	toastCounter += 1
+
+	local wrapper = new("Frame", {
+		Parent = ui.toastHolder,
+		Size = UDim2.new(1, 0, 0, CONFIG.ToastHeight),
+		BackgroundTransparency = 1,
+		LayoutOrder = toastCounter,
+	})
+	local card = new("CanvasGroup", {
+		Parent = wrapper,
+		Size = UDim2.fromScale(1, 1),
+		Position = UDim2.new(0, 0, -1.4, 0),
+		BackgroundColor3 = Color3.fromRGB(20, 14, 33),
+		BackgroundTransparency = 0.04,
+		GroupTransparency = 1,
+	}, {
+		corner(16),
+		stroke(color, 1.2, 0.35),
+		padding(12, 8, 14, 8),
+	})
+	local icon = new("Frame", {
+		Parent = card,
+		Size = UDim2.fromOffset(30, 30),
+		Position = UDim2.new(0, 0, 0.5, -15),
+		BackgroundColor3 = color,
+		BackgroundTransparency = 0.78,
+	}, { corner(15) })
+	new("TextLabel", {
+		Parent = icon,
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Text = glyph,
+		Font = Enum.Font.GothamBold,
+		TextSize = 16,
+		TextColor3 = color,
+	})
+	new("TextLabel", {
+		Parent = card,
+		Position = UDim2.new(0, 42, 0, 0),
+		Size = UDim2.new(1, -42, 1, 0),
+		BackgroundTransparency = 1,
+		Text = item.message,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 13,
+		TextColor3 = THEME.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+	})
+
+	tween(card, 0.35, { Position = UDim2.new(0, 0, 0, 0), GroupTransparency = 0 }, Enum.EasingStyle.Quint)
+	task.wait(0.35 + item.duration)
+	if state.closed then
+		return
+	end
+	tween(card, 0.3, { Position = UDim2.new(0, 0, -1.4, 0), GroupTransparency = 1 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	task.wait(0.3)
+	if state.closed then
+		return
+	end
+	tween(wrapper, 0.12, { Size = UDim2.new(1, 0, 0, 0) })
+	task.wait(0.12)
+	if state.closed then
+		return
+	end
+	wrapper:Destroy()
+	toastMessages[item.message] = nil
+	toastActive -= 1
+	pumpToasts()
+end
+
+pumpToasts = function()
+	while not state.closed and toastActive < CONFIG.MaxToasts and #toastQueue > 0 do
+		local item = table.remove(toastQueue, 1)
+		toastActive += 1
+		spawnTask(runToast, item)
+	end
+end
+
+showNotification = function(message, kind, duration)
+	if state.closed or not ui.toastHolder or not ui.toastHolder.Parent then
+		return
+	end
+	message = tostring(message)
+	if toastMessages[message] then
+		return
+	end
+	toastMessages[message] = true
+	if #toastQueue >= 8 then
+		local dropped = table.remove(toastQueue, 1)
+		toastMessages[dropped.message] = nil
+	end
+	table.insert(toastQueue, {
+		message = message,
+		kind = kind or "info",
+		duration = duration or CONFIG.ToastDuration,
+	})
+	pumpToasts()
+end
+
+--------------------------------------------------------------------------------
+-- UI BUILDERS
+--------------------------------------------------------------------------------
+
+local function makeLabel(parent, text, size, color, bold)
+	return new("TextLabel", {
+		Parent = parent,
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, size + 2),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Text = text,
+		Font = bold and Enum.Font.GothamBold or Enum.Font.Gotham,
+		TextSize = size,
+		TextColor3 = color or THEME.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		TextWrapped = true,
+	})
+end
+
+local function makeButton(parent, text, color, size)
+	return new("TextButton", {
+		Parent = parent,
+		Size = size or UDim2.new(1, 0, 0, 36),
+		BackgroundColor3 = color,
+		BackgroundTransparency = 0.04,
+		AutoButtonColor = true,
+		Text = text,
+		Font = Enum.Font.GothamBold,
+		TextSize = 13,
+		TextColor3 = THEME.Text,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, {
+		corner(10),
+		stroke(Color3.new(1, 1, 1), 1, 0.85),
+	})
+end
+
+local function makeTextBox(parent, placeholder, size)
+	local box = new("TextBox", {
+		Parent = parent,
+		Size = size,
+		BackgroundColor3 = Color3.fromRGB(16, 11, 27),
+		BackgroundTransparency = 0.05,
+		Text = "",
+		PlaceholderText = placeholder,
+		PlaceholderColor3 = THEME.Muted,
+		TextColor3 = THEME.Text,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 13,
+		ClearTextOnFocus = false,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, {
+		corner(10),
+		padding(10, 0, 10, 0),
+	})
+	local boxStroke = stroke(THEME.Border, 1, 0.3)
+	boxStroke.Parent = box
+	return box, boxStroke
+end
+
+local function makeCard(parent, order)
+	return new("Frame", {
+		Parent = parent,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = THEME.Surface,
+		BackgroundTransparency = 0.1,
+		LayoutOrder = order,
+	}, {
+		corner(14),
+		stroke(THEME.Border, 1, 0.5),
+		padding(12, 12, 12, 12),
+		new("UIListLayout", {
+			Padding = UDim.new(0, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+end
+
+local function makeSectionHeader(parent, title, order)
+	local header = new("Frame", {
+		Parent = parent,
+		Size = UDim2.new(1, 0, 0, 16),
+		BackgroundTransparency = 1,
+		LayoutOrder = order,
+	})
+	new("TextLabel", {
+		Parent = header,
+		Size = UDim2.new(1, -70, 1, 0),
+		BackgroundTransparency = 1,
+		Text = title,
+		Font = Enum.Font.GothamBold,
+		TextSize = 12,
+		TextColor3 = THEME.Accent,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+	local right = new("TextLabel", {
+		Parent = header,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = UDim2.new(0, 70, 1, 0),
+		BackgroundTransparency = 1,
+		Text = "",
+		Font = Enum.Font.GothamBold,
+		TextSize = 12,
+		TextColor3 = THEME.Muted,
+		TextXAlignment = Enum.TextXAlignment.Right,
+	})
+	return right
+end
+
+local function makeRow(parent, order, height)
+	return new("Frame", {
+		Parent = parent,
+		Size = UDim2.new(1, 0, 0, height or 36),
+		BackgroundTransparency = 1,
+		LayoutOrder = order,
+	}, {
+		new("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			Padding = UDim.new(0, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+end
+
+local function clampCenter(center, half, bounds)
+	local margin = 60
+	local x = math.clamp(center.X, margin - half.X, bounds.X - margin + half.X)
+	local y = math.clamp(center.Y, margin - half.Y, bounds.Y - margin + half.Y)
+	return Vector2.new(x, y)
+end
+
+local function makeDraggable(handle, target)
+	local drag = { moved = false }
+	local dragging = false
+	local dragInput = nil
+	local startMouse = Vector2.zero
+	local startCenter = Vector2.zero
+
+	connect(handle.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragInput = input
+			drag.moved = false
+			startMouse = Vector2.new(input.Position.X, input.Position.Y)
+			startCenter = Vector2.new(target.Position.X.Offset, target.Position.Y.Offset)
+		end
+	end)
+	connect(UserInputService.InputChanged, function(input)
+		if not dragging then
+			return
+		end
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input == dragInput then
+			local delta = Vector2.new(input.Position.X, input.Position.Y) - startMouse
+			if delta.Magnitude > 6 then
+				drag.moved = true
+			end
+			if drag.moved then
+				local half = target.AbsoluteSize / 2
+				local center = clampCenter(startCenter + delta, half, ui.gui.AbsoluteSize)
+				target.Position = UDim2.fromOffset(center.X, center.Y)
+			end
+		end
+	end)
+	connect(UserInputService.InputEnded, function(input)
+		if dragging and (input == dragInput or input.UserInputType == Enum.UserInputType.MouseButton1) then
+			dragging = false
+			dragInput = nil
+		end
+	end)
+	return drag
+end
+
+local function makeSlider(parent, order, title, minValue, maxValue, step, initial, formatValue, onChange, onCommit)
+	local holder = new("Frame", {
+		Parent = parent,
+		Size = UDim2.new(1, 0, 0, 48),
+		BackgroundTransparency = 1,
+		LayoutOrder = order,
+	})
+	local titleLabel = new("TextLabel", {
+		Parent = holder,
+		Size = UDim2.new(1, 0, 0, 16),
+		BackgroundTransparency = 1,
+		Text = "",
+		Font = Enum.Font.GothamMedium,
+		TextSize = 12,
+		TextColor3 = THEME.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+	local hit = new("Frame", {
+		Parent = holder,
+		Position = UDim2.fromOffset(0, 20),
+		Size = UDim2.new(1, 0, 0, 28),
+		BackgroundTransparency = 1,
+		Active = true,
+	})
+	local track = new("Frame", {
+		Parent = hit,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 0, 0.5, 0),
+		Size = UDim2.new(1, 0, 0, 8),
+		BackgroundColor3 = Color3.fromRGB(20, 14, 34),
+	}, { corner(4) })
+	local fill = new("Frame", {
+		Parent = track,
+		Size = UDim2.fromScale(0, 1),
+		BackgroundColor3 = THEME.Accent,
+	}, { corner(4) })
+	local knob = new("Frame", {
+		Parent = track,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0, 0.5),
+		Size = UDim2.fromOffset(20, 20),
+		BackgroundColor3 = THEME.Text,
+		ZIndex = 2,
+	}, { corner(10), stroke(THEME.Accent, 2, 0) })
+
+	local slider = { value = initial }
+	local sliding = false
+	local slideInput = nil
+
+	local function render()
+		local alpha = (slider.value - minValue) / (maxValue - minValue)
+		fill.Size = UDim2.fromScale(alpha, 1)
+		knob.Position = UDim2.fromScale(alpha, 0.5)
+		titleLabel.Text = title .. ": " .. formatValue(slider.value)
+	end
+
+	function slider.set(value)
+		if sliding then
+			return
+		end
+		slider.value = value
+		render()
+	end
+
+	local function updateFromX(x)
+		local alpha = math.clamp((x - hit.AbsolutePosition.X) / math.max(hit.AbsoluteSize.X, 1), 0, 1)
+		local raw = minValue + alpha * (maxValue - minValue)
+		local snapped = math.clamp(math.floor(raw / step + 0.5) * step, minValue, maxValue)
+		if snapped ~= slider.value then
+			slider.value = snapped
+			render()
+			onChange(snapped)
+		end
+	end
+
+	connect(hit.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			sliding = true
+			slideInput = input
+			updateFromX(input.Position.X)
+		end
+	end)
+	connect(UserInputService.InputChanged, function(input)
+		if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input == slideInput) then
+			updateFromX(input.Position.X)
+		end
+	end)
+	connect(UserInputService.InputEnded, function(input)
+		if sliding and (input == slideInput or input.UserInputType == Enum.UserInputType.MouseButton1) then
+			sliding = false
+			slideInput = nil
+			onCommit(slider.value)
+		end
+	end)
+
+	render()
+	return slider
+end
+
+local function askConfirm(message, confirmText, onConfirm)
+	if state.closed or not ui.confirmOverlay then
+		return
+	end
+	ui.confirmMessage.Text = message
+	ui.confirmYes.Text = confirmText
+	ui.confirmCallback = onConfirm
+	ui.confirmOverlay.Visible = true
+end
+
+local function hideConfirm()
+	ui.confirmCallback = nil
+	if ui.confirmOverlay then
+		ui.confirmOverlay.Visible = false
+	end
+end
+
+local function layoutUI()
+	if state.closed or not ui.gui then
+		return
+	end
+	local size = ui.gui.AbsoluteSize
+	if size.X <= 0 or size.Y <= 0 then
+		return -- ukuran layar belum siap; dipanggil ulang saat AbsoluteSize berubah
+	end
+	if not ui.placed then
+		ui.placed = true
+		ui.root.Position = UDim2.fromOffset(size.X / 2, size.Y / 2)
+		ui.pill.Position = UDim2.fromOffset(60, size.Y * 0.4)
+	end
+	local width = math.clamp(size.X - 24, 280, 390)
+	local height = math.clamp(size.Y - 80, 330, 590)
+	ui.root.Size = UDim2.fromOffset(width, height)
+	ui.toastHolder.Size = UDim2.fromOffset(math.clamp(size.X - 24, 240, 380), 0)
+
+	local rootCenter = clampCenter(
+		Vector2.new(ui.root.Position.X.Offset, ui.root.Position.Y.Offset),
+		Vector2.new(width / 2, height / 2),
+		size
+	)
+	ui.root.Position = UDim2.fromOffset(rootCenter.X, rootCenter.Y)
+
+	local pillCenter = clampCenter(
+		Vector2.new(ui.pill.Position.X.Offset, ui.pill.Position.Y.Offset),
+		Vector2.new(46, 17),
+		size
+	)
+	ui.pill.Position = UDim2.fromOffset(pillCenter.X, pillCenter.Y)
+end
+
+local function setMinimized(minimized)
+	if state.closed or not state.uiReady then
+		return
+	end
+	state.minimized = minimized
+	state.visToken += 1
+	local token = state.visToken
+	if minimized then
+		tween(ui.panel, 0.2, { GroupTransparency = 1 })
+		tween(ui.rootScale, 0.2, { Scale = 0.94 })
+		spawnTask(function()
+			task.wait(0.2)
+			if state.closed or token ~= state.visToken then
+				return
+			end
+			ui.root.Visible = false
+			ui.pill.Visible = true
+		end)
+	else
+		ui.pill.Visible = false
+		ui.rootScale.Scale = 0.94
+		ui.panel.GroupTransparency = 1
+		ui.root.Visible = true
+		tween(ui.panel, 0.25, { GroupTransparency = 0 })
+		tween(ui.rootScale, 0.25, { Scale = 1 }, Enum.EasingStyle.Back)
+	end
+end
+
+local function resolveGuiParent(gui)
+	if type(gethui) == "function" then
+		local ok, container = pcall(gethui)
+		if ok and typeof(container) == "Instance" then
+			local assigned = pcall(function()
+				gui.Parent = container
+			end)
+			if assigned and gui.Parent == container then
+				return
+			end
+		end
+	end
+	local assigned = pcall(function()
+		gui.Parent = game:GetService("CoreGui")
+	end)
+	if assigned and gui.Parent then
+		return
+	end
+	gui.Parent = player:WaitForChild("PlayerGui")
+end
+
+--------------------------------------------------------------------------------
+-- ESP + DAFTAR HASIL FIND
+--------------------------------------------------------------------------------
+
+local esp = { gui = nil, items = {}, token = 0, nextScan = 0, counter = nil }
+
+local function destroyEspItem(item)
+	item.board:Destroy()
+	if item.tracer then
+		item.tracer:Destroy()
+		item.tracer = nil
+	end
+end
+
+local function destroyEspItems()
+	for entry, item in pairs(esp.items) do
+		esp.items[entry] = nil
+		destroyEspItem(item)
+	end
+	if esp.counter then
+		esp.counter.Visible = false
+	end
+end
+
+local function ensureEspGui()
+	if esp.gui and esp.gui.Parent then
+		return true
+	end
+	local gui = new("ScreenGui", {
+		Name = "IsekaiReturnSystem_ESP",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true, -- koordinat garis penunjuk = koordinat viewport
+		DisplayOrder = 900,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	})
+	resolveGuiParent(gui)
+	esp.gui = gui
+	esp.counter = new("TextLabel", {
+		Parent = gui,
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 44),
+		Size = UDim2.fromOffset(320, 22),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 0.45,
+		Text = "",
+		Font = Enum.Font.GothamBold,
+		TextSize = 12,
+		TextColor3 = Color3.new(1, 1, 1),
+		Visible = false,
+	}, { corner(8) })
+	return gui.Parent ~= nil
+end
+
+-- Membuat ulang penanda ESP untuk semua hasil yang lolos filter.
+rebuildESP = function()
+	destroyEspItems()
+	if state.closed or not state.find.espEnabled then
+		return
+	end
+	if not ensureEspGui() then
+		return
+	end
+	for _, entry in ipairs(state.find.results) do
+		local visual = entry.visual
+		if visual and visual.Parent and entryAlive(entry) then
+			local color = ESP_COLORS[entry.id] or ESP_COLORS.custom
+			local label = new("TextLabel", {
+				Size = UDim2.new(1, 0, 0, 18),
+				BackgroundTransparency = 1,
+				Text = entry.name,
+				Font = Enum.Font.GothamBold,
+				TextSize = 12,
+				TextColor3 = color,
+				TextStrokeTransparency = 0.35,
+				TextStrokeColor3 = Color3.new(0, 0, 0),
+			})
+			local board = new("BillboardGui", {
+				Name = "ESP",
+				Adornee = visual,
+				AlwaysOnTop = true,
+				Size = UDim2.fromOffset(150, 34),
+				StudsOffset = Vector3.new(0, 2, 0),
+				LightInfluence = 0,
+				ResetOnSpawn = false,
+				Parent = esp.gui,
+			}, {
+				label,
+				new("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0),
+					Position = UDim2.new(0.5, 0, 0, 22),
+					Size = UDim2.fromOffset(9, 9),
+					BackgroundColor3 = color,
+				}, { corner(5), stroke(Color3.new(0, 0, 0), 1, 0.2) }),
+			})
+			esp.items[entry] = { board = board, label = label, color = color }
+		end
+	end
+end
+
+local function updateEspLabels()
+	local _, _, root = getCharacterParts()
+	local maxDist = state.prefs.espMaxDist
+	local shown = 0
+	local perLabel = {}
+	local order = {}
+	for entry, item in pairs(esp.items) do
+		if not entryAlive(entry) then
+			esp.items[entry] = nil
+			destroyEspItem(item)
+		else
+			local position = entryPosition(entry)
+			if position and root then
+				local dist = (position - root.Position).Magnitude
+				item.label.Text = string.format("%s • %dm", entry.name, math.floor(dist))
+				local visible = maxDist <= 0 or dist <= maxDist
+				item.board.Enabled = visible
+				item.visible = visible
+				if visible then
+					shown += 1
+					local key = entry.label or entry.id
+					if not perLabel[key] then
+						perLabel[key] = 0
+						table.insert(order, key)
+					end
+					perLabel[key] += 1
+				end
+			end
+		end
+	end
+	if esp.counter then
+		local on = state.prefs.espCounter and state.find.espEnabled
+		esp.counter.Visible = on
+		if on then
+			local parts = {}
+			for _, key in ipairs(order) do
+				table.insert(parts, string.format("%s %d", key, perLabel[key]))
+			end
+			esp.counter.Text = string.format("ESP: %d item%s", shown, #parts > 0 and (" • " .. table.concat(parts, " • ")) or "")
+		end
+	end
+end
+
+-- Garis penunjuk dari tengah-bawah layar ke tiap item (dijalankan tiap frame, hanya bila diaktifkan).
+local function updateTracers()
+	local wanted = state.prefs.espTracer and state.find.espEnabled and not state.closed
+	if not wanted then
+		if esp.tracersOn then
+			esp.tracersOn = false
+			for _, item in pairs(esp.items) do
+				if item.tracer then
+					item.tracer:Destroy()
+					item.tracer = nil
+				end
+			end
+		end
+		return
+	end
+	local camera = Workspace.CurrentCamera
+	if not camera or not esp.gui then
+		return
+	end
+	esp.tracersOn = true
+	local viewport = camera.ViewportSize
+	local origin = Vector2.new(viewport.X / 2, viewport.Y)
+	for entry, item in pairs(esp.items) do
+		local position = item.visible ~= false and entryPosition(entry) or nil
+		local tracer = item.tracer
+		if position then
+			local point = camera:WorldToViewportPoint(position)
+			if point.Z > 0 then
+				if not tracer then
+					tracer = new("Frame", {
+						Parent = esp.gui,
+						AnchorPoint = Vector2.new(0.5, 0.5),
+						BackgroundColor3 = item.color or Color3.new(1, 1, 1),
+						BackgroundTransparency = 0.35,
+						Size = UDim2.fromOffset(0, 1.5),
+					})
+					item.tracer = tracer
+				end
+				local target = Vector2.new(point.X, point.Y)
+				local delta = target - origin
+				tracer.Position = UDim2.fromOffset((origin.X + target.X) / 2, (origin.Y + target.Y) / 2)
+				tracer.Size = UDim2.fromOffset(delta.Magnitude, 1.5)
+				tracer.Rotation = math.deg(math.atan2(delta.Y, delta.X))
+				tracer.Visible = true
+			elseif tracer then
+				tracer.Visible = false
+			end
+		elseif tracer then
+			tracer.Visible = false
+		end
+	end
+end
+
+-- Isi ulang daftar hasil (diurutkan dari yang terdekat) + ringkasan jumlah per kategori / jenis / pemicu.
+refreshResultList = function()
+	if state.closed or not ui.resultList then
+		return
+	end
+	local find = state.find
+	for _, child in ipairs(ui.resultList:GetChildren()) do
+		if child.Name == "Row" then
+			child:Destroy()
+		end
+	end
+
+	local _, _, root = getCharacterParts()
+	local rows = {}
+	for _, entry in ipairs(find.results) do
+		local position = entryPosition(entry)
+		if position and entryAlive(entry) then
+			table.insert(rows, {
+				entry = entry,
+				distance = root and (position - root.Position).Magnitude or 0,
+			})
+		end
+	end
+	table.sort(rows, function(a, b)
+		return a.distance < b.distance
+	end)
+
+	ui.resultEmpty.Visible = #rows == 0
+	ui.resultCount.Text = #rows > 0 and string.format("%d item", #rows) or ""
+
+	local shown = math.min(#rows, CONFIG.ResultListMax)
+	for index = 1, shown do
+		local row, entry = rows[index], rows[index].entry
+		new("TextLabel", {
+			Name = "Row",
+			Parent = ui.resultList,
+			LayoutOrder = index,
+			Size = UDim2.new(1, 0, 0, 20),
+			BackgroundTransparency = 1,
+			Text = string.format("[%s] %s • %s • %d stud", entry.label, entry.name, entry.typeText, math.floor(row.distance)),
+			Font = Enum.Font.GothamMedium,
+			TextSize = 11,
+			TextColor3 = ESP_COLORS[entry.id] or THEME.Text,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+		})
+	end
+	if #rows > shown then
+		new("TextLabel", {
+			Name = "Row",
+			Parent = ui.resultList,
+			LayoutOrder = shown + 1,
+			Size = UDim2.new(1, 0, 0, 20),
+			BackgroundTransparency = 1,
+			Text = string.format("... +%d item lainnya", #rows - shown),
+			Font = Enum.Font.Gotham,
+			TextSize = 11,
+			TextColor3 = THEME.Muted,
+			TextXAlignment = Enum.TextXAlignment.Left,
+		})
+	end
+
+	if not find.scanned then
+		ui.resultSummary.Text = "Belum dipindai. Tekan Scan atau nyalakan ESP."
+		return
+	end
+	local kinds, trigs = find.kindCounts, find.trigCounts
+	ui.resultSummary.Text = string.format(
+		"Cocok nama: %d • Lolos filter: %d%s\nKategori: %s\nJenis: Part %d • Model %d • Tool %d\nPemicu: Prompt %d • Click %d • Touch %d • Tanpa pemicu %d",
+		#find.raw, #find.results, find.truncated and " (dibatasi)" or "",
+		describeCounts(),
+		kinds.part, kinds.model, kinds.tool,
+		trigs.prompt, trigs.click, trigs.touch, trigs.plain
+	)
+end
+
+-- Loop ESP: memperbarui jarak, membuang item yang sudah terambil, dan memindai ulang berkala.
+local function espLoop(token)
+	local find = state.find
+	while not state.closed and esp.token == token and find.espEnabled do
+		if os.clock() >= esp.nextScan and not find.running and not find.scanning then
+			esp.nextScan = os.clock() + CONFIG.EspRescanInterval
+			local scan = scanTargets(find.token, true)
+			if scan and not state.closed and esp.token == token and find.espEnabled
+				and not find.running and not find.scanning then
+				applyScan(scan)
+				find.statusText = string.format("ESP: %d item terlihat (%s)", #find.results, describeCounts())
+				rebuildESP()
+				refreshResultList()
+				refreshFindUI()
+			elseif not scan and not state.closed and #buildMatchers() == 0 then
+				find.statusText = "ESP: pilih minimal satu kategori atau isi kata kunci manual."
+				refreshFindUI()
+			end
+		end
+		updateEspLabels()
+		task.wait(0.25)
+	end
+end
+
+local function setEsp(enabled)
+	local find = state.find
+	find.espEnabled = enabled
+	esp.token += 1
+	if enabled then
+		if ui.findBox then
+			find.custom = sanitizeKeywords(ui.findBox.Text)
+		end
+		esp.nextScan = 0
+		local token = esp.token
+		find.statusText = "ESP aktif: memindai item..."
+		spawnTask(function()
+			espLoop(token)
+		end)
+	else
+		destroyEspItems()
+		find.statusText = "ESP dimatikan."
+	end
+	refreshFindUI()
+	notify("ESP " .. (enabled and "diaktifkan; pemindaian target dimulai." or "dimatikan."), enabled and "success" or "info")
+end
+
+-- Dipanggil saat chip jenis / pemicu diubah: saring ulang tanpa scan ulang.
+local function onFilterChanged()
+	persistSavedData()
+	applyFilters()
+	refreshResultList()
+	rebuildESP()
+	refreshFindUI()
+end
+
+-- Kategori / kata kunci berubah: ESP perlu scan ulang segera.
+local function onScanCriteriaChanged()
+	persistSavedData()
+	esp.nextScan = 0
+	refreshFindUI()
+end
+
+--------------------------------------------------------------------------------
+-- KONTROL TERIKAT PREFERENSI (v12) + TAB SERVER
+--------------------------------------------------------------------------------
+ui.prefRenders = {}
+ui.refreshPrefs = function()
+	for _, render in ipairs(ui.prefRenders) do
+		render()
+	end
+end
+
+local function makePrefToggle(parent, order, label, key, onChange)
+	local button = makeButton(parent, label, THEME.SurfaceHi)
+	button.LayoutOrder = order
+	local function render()
+		local on = state.prefs[key] == true
+		button.Text = label .. ": " .. (on and "ON" or "OFF")
+		button.BackgroundColor3 = on and THEME.AccentDark or THEME.SurfaceHi
+	end
+	connect(button.Activated, function()
+		setPref(key, not state.prefs[key])
+		persistSavedData()
+		render()
+		if onChange then
+			onChange(state.prefs[key])
+		end
+	end)
+	table.insert(ui.prefRenders, render)
+	render()
+	return button
+end
+
+-- Tombol siklus untuk pref bertipe enum. names: nilai -> teks tampilan.
+local function makePrefCycle(parent, order, label, key, names, onChange)
+	local def = PREF_DEFS[key]
+	local button = makeButton(parent, label, THEME.SurfaceHi)
+	button.LayoutOrder = order
+	local function render()
+		local value = state.prefs[key]
+		button.Text = label .. ": " .. tostring(names[value] or value)
+	end
+	connect(button.Activated, function()
+		local index = table.find(def.values, state.prefs[key]) or 0
+		setPref(key, def.values[index % #def.values + 1])
+		persistSavedData()
+		render()
+		if onChange then
+			onChange(state.prefs[key])
+		end
+	end)
+	table.insert(ui.prefRenders, render)
+	render()
+	return button
+end
+
+local function makePrefSlider(parent, order, title, key, step, fmt, onCommit)
+	local def = PREF_DEFS[key]
+	local slider = makeSlider(parent, order, title, def.min, def.max, step, state.prefs[key], fmt,
+		function(value)
+			state.prefs[key] = value
+		end,
+		function(value)
+			persistSavedData()
+			if onCommit then
+				onCommit(value)
+			end
+		end
+	)
+	table.insert(ui.prefRenders, function()
+		slider.set(state.prefs[key])
+	end)
+	return slider
+end
+
+-- Kotak teks untuk pref string/angka; nilai divalidasi saat fokus hilang.
+local function makePrefBox(parent, order, placeholder, key, onChange)
+	local def = PREF_DEFS[key]
+	local box = makeTextBox(parent, placeholder, UDim2.new(1, 0, 0, 36))
+	box.LayoutOrder = order
+	local function render()
+		if not box:IsFocused() then
+			box.Text = tostring(state.prefs[key])
+		end
+	end
+	connect(box.FocusLost, function()
+		local value = box.Text
+		if def.t == "number" then
+			value = tonumber(value)
+		end
+		if value ~= nil and setPref(key, value) then
+			persistSavedData()
+			if onChange then
+				onChange(state.prefs[key])
+			end
+		else
+			notify("Nilai tidak valid untuk kolom ini.", "warning")
+		end
+		box.Text = tostring(state.prefs[key])
+	end)
+	table.insert(ui.prefRenders, render)
+	render()
+	return box
+end
+
+local SERVER_MODE_NAMES = { all = "Semua server", public = "Hanya Public", private = "Hanya Private" }
+local TARGET_NAMES = { same = "Server sama", any = "Server mana saja", hop = "Hop (server lain)" }
+local ACTION_NAMES = { rejoin = "Rejoin", hop = "Hop", notify = "Beri tahu saja", stop = "Stop Find" }
+local PING_ACTION_NAMES = { notify = "Beri tahu saja", hop = "Hop server" }
+
+local function syncServerMode()
+	local server = state.server
+	local allowed = serverAllowed()
+	if server.onModeChanged and allowed ~= server.lastAllowed then
+		server.onModeChanged(allowed)
+	end
+	if ui.refreshServer then
+		ui.refreshServer()
+	end
+end
+
+local function buildServerTab(page)
+	local server = state.server
+
+	-- Mode server ----------------------------------------------------------------------------
+	local modeCard = makeCard(page, 1)
+	makeSectionHeader(modeCard, "MODE SERVER", 1)
+	ui.serverInfo = makeLabel(modeCard, "", 12, THEME.Text, false)
+	ui.serverInfo.LayoutOrder = 2
+	makePrefCycle(modeCard, 3, "Fitur aktif di", "serverMode", SERVER_MODE_NAMES, syncServerMode)
+	makePrefCycle(modeCard, 4, "Server reserved dianggap", "reservedAs", { public = "Public", private = "Private" }, syncServerMode)
+	local modeHint = makeLabel(modeCard, "Bila Mode = Hanya Private, Find / Auto Return / Anti-AFK / Anti-Sit / Anti-Stuck mati di server public (dan sebaliknya). Server VIP dibaca lewat PrivateServerId + PrivateServerOwnerId; server reserved buatan game (tanpa pemilik) memakai pilihan 'dianggap'. Mode ini juga menahan auto-reconnect, hop, ping, stall dan batas sesi.", 11, THEME.Muted, false)
+	modeHint.LayoutOrder = 5
+
+	-- Auto reconnect -----------------------------------------------------------------------------
+	local netCard = makeCard(page, 2)
+	makeSectionHeader(netCard, "AUTO RECONNECT (INTERNET PUTUS)", 1)
+	makePrefToggle(netCard, 2, "Auto Reconnect", "netRejoin")
+	makePrefSlider(netCard, 3, "Maks. percobaan", "netTries", 1, function(value)
+		return string.format("%d kali", value)
+	end)
+	ui.netInfo = makeLabel(netCard, "", 12, THEME.Muted, true)
+	ui.netInfo.LayoutOrder = 4
+	local netHint = makeLabel(netCard, "Saat layar disconnect muncul (kode 260/261/262/266/277/278/279/282 atau pesan koneksi/internet; kick dan ban tidak dihitung), script menunggu beberapa detik lalu mencoba rejoin dengan jeda 5, 10, 20, lalu 30 detik. Setelah pindah server script hanya berjalan lagi bila Autoexecute (tab Advanced) aktif. Perilaku saat benar-benar tanpa internet belum diuji di semua executor; Watchdog Windows menjadi cadangan bila Roblox tertutup.", 11, THEME.Muted, false)
+	netHint.LayoutOrder = 5
+
+	-- Rejoin & hop ----------------------------------------------------------------------------------
+	local hopCard = makeCard(page, 3)
+	makeSectionHeader(hopCard, "REJOIN & HOP", 1)
+	makePrefCycle(hopCard, 2, "Tujuan rejoin (bila Kunci OFF)", "rejoinTarget", TARGET_NAMES)
+	makePrefToggle(hopCard, 3, "Kunci server sama (semua rejoin)", "rejoinSameLock")
+	makePrefCycle(hopCard, 4, "Hop memilih", "hopMode", { low = "Paling sepi", random = "Acak" })
+	makePrefToggle(hopCard, 5, "Lanjut Find setelah mati", "resumeAfterDeath")
+	local quickRow = makeRow(hopCard, 6, 36)
+	ui.quickJoinBtn = makeButton(quickRow, "Quick Join (Hop)", THEME.AccentDark, UDim2.new(1, 0, 1, 0))
+	connect(ui.quickJoinBtn.Activated, function()
+		if not serverAllowed() then
+			notify("Quick Join dilewati: tipe server tidak sesuai Mode server.", "warning")
+			return
+		end
+		server.quickJoin()
+	end)
+	local hopHint = makeLabel(hopCard, "Kunci server sama (bawaan ON): SEMUA rejoin (Rejoin Now, timer manual, Auto Rejoin Find, auto reconnect, stall, ping, batas sesi) selalu kembali ke server (JobId) yang sedang dimasuki dan tidak jatuh ke server lain; aksi 'Hop' otomatis diganti rejoin ke server yang sama. Quick Join dan Join Terpilih tetap pindah server karena kamu memilihnya sendiri. Batas Roblox: bila kamu sendirian di server (server ditutup saat pemain terakhir keluar), server penuh, atau server sudah tidak ada, teleport bisa ditolak; script mencoba ulang sampai 3 kali lalu berhenti dan tetap di server ini. Kunci OFF memakai 'Tujuan rejoin' (Server sama / Server mana saja / Hop). 'Hop' membutuhkan executor dengan request/http_request, memilih server publik yang masih ada slot dan belum ada di riwayat 25 server terakhir. Daftar server dibatasi rate-limit Roblox.", 11, THEME.Muted, false)
+	hopHint.LayoutOrder = 7
+
+	-- Server browser ----------------------------------------------------------------------------------
+	local browserCard = makeCard(page, 4)
+	ui.serverCount = makeSectionHeader(browserCard, "SERVER BROWSER", 1)
+	local browserRow = makeRow(browserCard, 2, 36)
+	ui.serverRefreshBtn = makeButton(browserRow, "Muat Daftar", THEME.SurfaceHi, UDim2.new(0.5, -4, 1, 0))
+	ui.serverRefreshBtn.LayoutOrder = 1
+	ui.serverJoinBtn = makeButton(browserRow, "Join Terpilih", THEME.AccentDark, UDim2.new(0.5, -4, 1, 0))
+	ui.serverJoinBtn.LayoutOrder = 2
+	ui.serverList = new("ScrollingFrame", {
+		Parent = browserCard,
+		LayoutOrder = 3,
+		Size = UDim2.new(1, 0, 0, 150),
+		BackgroundColor3 = Color3.fromRGB(14, 10, 24),
+		BackgroundTransparency = 0.25,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = THEME.Accent,
+	}, {
+		corner(10),
+		stroke(THEME.Border, 1, 0.6),
+		padding(6, 6, 6, 6),
+		new("UIListLayout", {
+			Padding = UDim.new(0, 4),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	ui.serverEmpty = new("TextLabel", {
+		Parent = ui.serverList,
+		Size = UDim2.new(1, 0, 0, 40),
+		BackgroundTransparency = 1,
+		Text = "Tekan Muat Daftar.",
+		Font = Enum.Font.Gotham,
+		TextSize = 12,
+		TextColor3 = THEME.Muted,
+		LayoutOrder = 0,
+	})
+	ui.serverRows = {}
+	ui.serverListStatus = makeLabel(browserCard, "", 11, THEME.Muted, false)
+	ui.serverListStatus.LayoutOrder = 4
+	connect(ui.serverRefreshBtn.Activated, function()
+		server.refreshList()
+	end)
+	connect(ui.serverJoinBtn.Activated, function()
+		server.joinSelected()
+	end)
+
+	-- Ping monitor ------------------------------------------------------------------------------------------
+	local pingCard = makeCard(page, 5)
+	ui.pingLabel = makeSectionHeader(pingCard, "PING MONITOR", 1)
+	makePrefToggle(pingCard, 2, "Ping Monitor", "pingOn")
+	makePrefSlider(pingCard, 3, "Batas ping", "pingLimit", 50, function(value)
+		return string.format("%d ms", value)
+	end)
+	makePrefSlider(pingCard, 4, "Pengecekan berturut-turut (tiap 2 dtk)", "pingStrikes", 1, function(value)
+		return string.format("%d kali", value)
+	end)
+	makePrefCycle(pingCard, 5, "Bila ping tinggi", "pingAction", PING_ACTION_NAMES)
+
+	-- Stall watchdog --------------------------------------------------------------------------------------------
+	local stallCard = makeCard(page, 6)
+	makeSectionHeader(stallCard, "STALL WATCHDOG (TIDAK ADA PROGRES)", 1)
+	makePrefToggle(stallCard, 2, "Stall Watchdog", "stallOn")
+	makePrefSlider(stallCard, 3, "Tanpa progres selama", "stallMinutes", 1, function(value)
+		return string.format("%d menit", value)
+	end)
+	makePrefBox(stallCard, 4, "Nama leaderstat (opsional, mis. Coins)", "stallStat")
+	makePrefCycle(stallCard, 5, "Tindakan", "stallAction", ACTION_NAMES)
+	local stallHint = makeLabel(stallCard, "Hanya dihitung saat Find / Loop Find / Patrol aktif. Progres = jumlah item terkumpul berubah ATAU nilai leaderstat bernama itu berubah. Tidak ada progres selama batas waktu memicu tindakan terpilih.", 11, THEME.Muted, false)
+	stallHint.LayoutOrder = 6
+
+	-- Batas sesi ------------------------------------------------------------------------------------------------------
+	local limitCard = makeCard(page, 7)
+	makeSectionHeader(limitCard, "BATAS SESI", 1)
+	makePrefToggle(limitCard, 2, "Batas Sesi", "limitOn")
+	makePrefSlider(limitCard, 3, "Batas waktu Find aktif", "limitMinutes", 5, function(value)
+		return value == 0 and "nonaktif" or string.format("%d menit", value)
+	end)
+	makePrefSlider(limitCard, 4, "Batas jumlah item", "limitItems", 10, function(value)
+		return value == 0 and "nonaktif" or string.format("%d item", value)
+	end)
+	makePrefCycle(limitCard, 5, "Bila tercapai", "limitAction", ACTION_NAMES)
+	local limitHint = makeLabel(limitCard, "Waktu dihitung hanya saat Find aktif; hitungan mulai ulang setelah batas tercapai atau script dimuat ulang (rejoin).", 11, THEME.Muted, false)
+	limitHint.LayoutOrder = 6
+
+	-- Link server private (untuk Watchdog Windows) ------------------------------------------------------------------------
+	local linkCard = makeCard(page, 8)
+	makeSectionHeader(linkCard, "LINK SERVER PRIVATE (WATCHDOG)", 1)
+	makePrefBox(linkCard, 2, "https://www.roblox.com/games/...?privateServerLinkCode=...", "privateLink")
+	local linkHint = makeLabel(linkCard, "Hanya dibaca Watchdog Windows untuk membuka kembali server private bila Roblox tertutup. Script di dalam game tidak memakainya.", 11, THEME.Muted, false)
+	linkHint.LayoutOrder = 3
+
+	local function rebuildServerList()
+		for _, row in ipairs(ui.serverRows) do
+			row:Destroy()
+		end
+		ui.serverRows = {}
+		local list = server.list
+		ui.serverEmpty.Visible = #list == 0
+		for index, entry in ipairs(list) do
+			local selected = server.selectedJob == entry.id
+			local pingText = entry.ping and string.format("%dms", entry.ping) or "-"
+			local row = makeButton(ui.serverList, string.format("%d/%d pemain  •  ping %s  •  %s", entry.playing, entry.max, pingText, entry.id:sub(1, 8)), selected and THEME.AccentDark or THEME.SurfaceHi, UDim2.new(1, 0, 0, 30))
+			row.LayoutOrder = index
+			row.TextSize = 11
+			-- Baris dibuat ulang tiap refresh: dihubungkan langsung (putus otomatis saat baris dihancurkan).
+			row.Activated:Connect(function()
+				server.selectedJob = entry.id
+				ui.serverListSig = nil
+				if ui.refreshServer then
+					ui.refreshServer()
+				end
+			end)
+			table.insert(ui.serverRows, row)
+		end
+	end
+
+	ui.refreshServer = function()
+		if state.closed or not ui.serverInfo then
+			return
+		end
+		local rawType = detectServerType()
+		local effective = effectiveServerType()
+		local allowed = serverAllowed()
+		local typeText = rawType == "reserved" and string.format("RESERVED (dianggap %s)", effective:upper()) or rawType:upper()
+		local jobText = game.JobId ~= "" and game.JobId:sub(1, 8) or "-"
+		ui.serverInfo.Text = string.format(
+			"Server ini : %s\nMode : %s\nFitur otomatis : %s\nJobId : %s",
+			typeText,
+			SERVER_MODE_NAMES[state.prefs.serverMode] or state.prefs.serverMode,
+			allowed and "AKTIF" or "DIJEDA (tipe server tidak cocok)",
+			jobText
+		)
+		ui.serverInfo.TextColor3 = allowed and THEME.Text or THEME.Warning
+
+		local net = server.net
+		if net and net.active then
+			ui.netInfo.Text = string.format("Reconnect berjalan: percobaan %d/%d", net.attempts, state.prefs.netTries)
+			ui.netInfo.TextColor3 = THEME.Warning
+		else
+			ui.netInfo.Text = string.format("Siaga. Total reconnect: %d • rejoin: %d • hop: %d", state.stats.reconnects, state.stats.rejoins, state.stats.hops)
+			ui.netInfo.TextColor3 = THEME.Muted
+		end
+
+		ui.pingLabel.Text = server.ping and string.format("%d ms", server.ping) or "-"
+
+		local sig = tostring(server.list) .. "|" .. tostring(server.selectedJob)
+		if sig ~= ui.serverListSig then
+			ui.serverListSig = sig
+			rebuildServerList()
+		end
+		ui.serverCount.Text = #server.list > 0 and string.format("%d server", #server.list) or ""
+		ui.serverListStatus.Text = server.listStatus or ""
+		ui.serverRefreshBtn.Text = server.listBusy and "Memuat..." or "Muat Daftar"
+		ui.serverJoinBtn.Text = server.selectedJob and "Join Terpilih" or "Pilih server dulu"
+		if ui.refreshTools then
+			ui.refreshTools()
+		end
+	end
+	ui.refreshServer()
+end
+
+--------------------------------------------------------------------------------
+-- TAB TOOLS
+--------------------------------------------------------------------------------
+local function makePrefKey(parent, order, label, key)
+	local button = makeButton(parent, label, THEME.SurfaceHi)
+	button.LayoutOrder = order
+	local function render()
+		if state.capturingPref == key then
+			button.Text = label .. ": tekan tombol..."
+			button.BackgroundColor3 = THEME.Accent
+		else
+			local value = state.prefs[key]
+			button.Text = label .. ": " .. ((value == nil or value == "") and "-" or value)
+			button.BackgroundColor3 = THEME.SurfaceHi
+		end
+	end
+	connect(button.Activated, function()
+		state.capturingKey = false
+		state.capturingFindKey = nil
+		state.capturingPref = key
+		ui.refreshPrefs()
+		local clearable = PREF_DEFS[key] and PREF_DEFS[key].d == ""
+		notify("Tekan tombol keyboard baru (Esc batal" .. (clearable and ", Backspace kosongkan" or "") .. ").", "info")
+	end)
+	table.insert(ui.prefRenders, render)
+	render()
+	return button
+end
+
+local function buildToolsTab(page)
+	local tools = state.tools
+
+	-- Statistik sesi ---------------------------------------------------------------------------------------
+	local statsCard = makeCard(page, 1)
+	makeSectionHeader(statsCard, "STATISTIK SESI", 1)
+	ui.statsLabel = makeLabel(statsCard, "", 12, THEME.Text, false)
+	ui.statsLabel.LayoutOrder = 2
+	local statsRow = makeRow(statsCard, 3, 34)
+	local resetStatsBtn = makeButton(statsRow, "Reset Statistik", THEME.SurfaceHi, UDim2.new(1, 0, 1, 0))
+	connect(resetStatsBtn.Activated, function()
+		askConfirm("Reset semua statistik sesi (item, rejoin, hop, stall, reconnect)?", "Reset", function()
+			local stats = state.stats
+			stats.startedAt = os.time()
+			stats.collected = 0
+			stats.rejoins = 0
+			stats.hops = 0
+			stats.stalls = 0
+			stats.reconnects = 0
+			state.server.limitBase = 0
+			persistSavedData()
+			if ui.refreshTools then
+				ui.refreshTools()
+			end
+			notify("Statistik sesi direset.", "info")
+		end)
+	end)
+
+	-- Webhook ---------------------------------------------------------------------------------------------------
+	local hookCard = makeCard(page, 2)
+	makeSectionHeader(hookCard, "WEBHOOK DISCORD", 1)
+	makePrefToggle(hookCard, 2, "Webhook", "webhookOn")
+	makePrefBox(hookCard, 3, "https://discord.com/api/webhooks/...", "webhookUrl")
+	makePrefToggle(hookCard, 4, "Kirim: rejoin / koneksi", "whRejoin")
+	makePrefToggle(hookCard, 5, "Kirim: stall / ping tinggi", "whStall")
+	makePrefToggle(hookCard, 6, "Kirim: batas sesi", "whLimit")
+	makePrefSlider(hookCard, 7, "Ringkasan berkala", "whSummaryMin", 5, function(value)
+		return value == 0 and "nonaktif" or string.format("tiap %d menit", value)
+	end)
+	local testRow = makeRow(hookCard, 8, 34)
+	local testBtn = makeButton(testRow, "Kirim Tes", THEME.AccentDark, UDim2.new(1, 0, 1, 0))
+	connect(testBtn.Activated, function()
+		tools.webhookTest()
+	end)
+	local hookHint = makeLabel(hookCard, "URL webhook disimpan apa adanya di file data executor Anda dan TIDAK ikut diekspor lewat preset. Butuh executor dengan request/http_request. Pesan 'rejoin' dikirim sesaat sebelum teleport, jadi kadang tidak sempat terkirim.", 11, THEME.Muted, false)
+	hookHint.LayoutOrder = 9
+
+	-- Hemat resource ------------------------------------------------------------------------------------------------
+	local ecoCard = makeCard(page, 3)
+	makeSectionHeader(ecoCard, "HEMAT RESOURCE (AFK LAMA)", 1)
+	makePrefToggle(ecoCard, 2, "Mode Hemat", "ecoOn", function()
+		tools.eco.apply()
+	end)
+	makePrefSlider(ecoCard, 3, "Batas FPS saat hemat", "ecoFps", 1, function(value)
+		return string.format("%d FPS", value)
+	end, function()
+		if tools.eco.active then
+			tools.eco.setFps(state.prefs.ecoFps)
+		end
+	end)
+	makePrefToggle(ecoCard, 4, "Grafik rendah saat hemat", "ecoLowGfx")
+	makePrefToggle(ecoCard, 5, "Layar hitam saat hemat", "ecoBlack")
+	ui.blackBtn = makeButton(ecoCard, "Layar Hitam: OFF", THEME.SurfaceHi)
+	ui.blackBtn.LayoutOrder = 6
+	connect(ui.blackBtn.Activated, function()
+		tools.eco.setBlack(not tools.eco.black)
+	end)
+	local ecoHint = makeLabel(ecoCard, "Layar hitam mematikan rendering 3D (UI script tetap tampil). FPS cap butuh setfpscap dari executor. Pengaturan grafik asli dikembalikan saat Mode Hemat dimatikan atau script ditutup. Perubahan grafik/FPS berlaku setelah Mode Hemat dinyalakan ulang.", 11, THEME.Muted, false)
+	ecoHint.LayoutOrder = 7
+
+	-- Hotkey ---------------------------------------------------------------------------------------------------------------
+	local keyCard = makeCard(page, 4)
+	makeSectionHeader(keyCard, "HOTKEY", 1)
+	makePrefKey(keyCard, 2, "Tampil / sembunyi UI", "hkToggleUI")
+	makePrefKey(keyCard, 3, "Start / Stop Find", "hkFind")
+	makePrefKey(keyCard, 4, "Stop semua proses", "hkStopAll")
+	makePrefKey(keyCard, 5, "Layar hitam", "hkBlack")
+	local keyHint = makeLabel(keyCard, "Hotkey tidak aktif saat mengetik di kotak teks atau bila tombol sudah diproses game. Tombol gerak (WASD / panah) tidak boleh dipakai.", 11, THEME.Muted, false)
+	keyHint.LayoutOrder = 6
+
+	-- Tampilan, log, update ------------------------------------------------------------------------------------------------------
+	local viewCard = makeCard(page, 5)
+	makeSectionHeader(viewCard, "TAMPILAN, LOG & UPDATE", 1)
+	local themeNames = {}
+	for name in pairs(THEME_PRESETS) do
+		themeNames[name] = name
+	end
+	makePrefCycle(viewCard, 2, "Tema warna", "theme", themeNames)
+	makePrefToggle(viewCard, 3, "Log detail di console", "logVerbose")
+	makePrefToggle(viewCard, 4, "Tulis log ke file", "logFile")
+	makePrefToggle(viewCard, 5, "Cek update saat mulai", "updateCheck")
+	local updateRow = makeRow(viewCard, 6, 34)
+	local updateBtn = makeButton(updateRow, "Cek Update Sekarang", THEME.SurfaceHi, UDim2.new(1, 0, 1, 0))
+	connect(updateBtn.Activated, function()
+		tools.checkUpdate(true)
+	end)
+	local viewHint = makeLabel(viewCard, "Tema baru berlaku setelah script dimuat ulang. File log: " .. CONFIG.LogFile .. " (dibatasi ukurannya). Cek update membaca URL raw di tab Advanced dan membandingkan nomor revisi script.", 11, THEME.Muted, false)
+	viewHint.LayoutOrder = 7
+
+	-- Preset ------------------------------------------------------------------------------------------------------------------------
+	local presetCard = makeCard(page, 6)
+	ui.presetCount = makeSectionHeader(presetCard, "PRESET PENGATURAN", 1)
+	local presetNameRow = makeRow(presetCard, 2, 36)
+	ui.presetNameBox = makeTextBox(presetNameRow, "Nama preset", UDim2.new(1, -96, 1, 0))
+	ui.presetNameBox.LayoutOrder = 1
+	local presetSaveBtn = makeButton(presetNameRow, "Simpan", THEME.AccentDark, UDim2.fromOffset(88, 36))
+	presetSaveBtn.LayoutOrder = 2
+	ui.presetList = new("ScrollingFrame", {
+		Parent = presetCard,
+		LayoutOrder = 3,
+		Size = UDim2.new(1, 0, 0, 100),
+		BackgroundColor3 = Color3.fromRGB(14, 10, 24),
+		BackgroundTransparency = 0.25,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = THEME.Accent,
+	}, {
+		corner(10),
+		stroke(THEME.Border, 1, 0.6),
+		padding(6, 6, 6, 6),
+		new("UIListLayout", {
+			Padding = UDim.new(0, 4),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	ui.presetEmpty = new("TextLabel", {
+		Parent = ui.presetList,
+		Size = UDim2.new(1, 0, 0, 30),
+		BackgroundTransparency = 1,
+		Text = "Belum ada preset.",
+		Font = Enum.Font.Gotham,
+		TextSize = 12,
+		TextColor3 = THEME.Muted,
+		LayoutOrder = 0,
+	})
+	ui.presetRows = {}
+	local presetActions = new("Frame", {
+		Parent = presetCard,
+		LayoutOrder = 4,
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundTransparency = 1,
+	}, {
+		new("UIGridLayout", {
+			CellSize = UDim2.new(0.5, -4, 1, 0),
+			CellPadding = UDim2.fromOffset(8, 0),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	local presetLoadBtn = makeButton(presetActions, "Muat", THEME.AccentDark)
+	presetLoadBtn.LayoutOrder = 1
+	local presetDeleteBtn = makeButton(presetActions, "Hapus", Color3.fromRGB(150, 38, 70))
+	presetDeleteBtn.LayoutOrder = 2
+	ui.importBox = makeTextBox(presetCard, "Tempel teks pengaturan (JSON) untuk impor", UDim2.new(1, 0, 0, 36))
+	ui.importBox.LayoutOrder = 5
+	local shareActions = new("Frame", {
+		Parent = presetCard,
+		LayoutOrder = 6,
+		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundTransparency = 1,
+	}, {
+		new("UIGridLayout", {
+			CellSize = UDim2.new(0.5, -4, 1, 0),
+			CellPadding = UDim2.fromOffset(8, 0),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	local exportBtn = makeButton(shareActions, "Ekspor (salin)", THEME.SurfaceHi)
+	exportBtn.LayoutOrder = 1
+	local importBtn = makeButton(shareActions, "Impor", THEME.SurfaceHi)
+	importBtn.LayoutOrder = 2
+	local presetHint = makeLabel(presetCard, "Preset menyimpan semua pengaturan di tab Server dan Tools (bukan URL webhook / link private). Slot posisi tidak ikut.", 11, THEME.Muted, false)
+	presetHint.LayoutOrder = 7
+
+	connect(presetSaveBtn.Activated, function()
+		tools.savePreset(ui.presetNameBox.Text)
+	end)
+	connect(presetLoadBtn.Activated, function()
+		tools.loadPreset()
+	end)
+	connect(presetDeleteBtn.Activated, function()
+		tools.deletePreset()
+	end)
+	connect(exportBtn.Activated, function()
+		tools.exportSettings()
+	end)
+	connect(importBtn.Activated, function()
+		tools.importSettings()
+	end)
+
+	local function rebuildPresetList()
+		for _, row in ipairs(ui.presetRows) do
+			row:Destroy()
+		end
+		ui.presetRows = {}
+		ui.presetEmpty.Visible = #state.presets == 0
+		for index, preset in ipairs(state.presets) do
+			local selected = tools.selectedPreset == index
+			local row = makeButton(ui.presetList, preset.name, selected and THEME.AccentDark or THEME.SurfaceHi, UDim2.new(1, 0, 0, 28))
+			row.LayoutOrder = index
+			row.TextSize = 12
+			row.Activated:Connect(function()
+				tools.selectedPreset = index
+				ui.presetSig = nil
+				if ui.refreshTools then
+					ui.refreshTools()
+				end
+			end)
+			table.insert(ui.presetRows, row)
+		end
+	end
+
+	ui.refreshTools = function()
+		if state.closed or not ui.statsLabel then
+			return
+		end
+		local stats = state.stats
+		local uptime = os.time() - stats.startedAt
+		local perHour = uptime >= 60 and (stats.collected / (uptime / 3600)) or 0
+		ui.statsLabel.Text = string.format(
+			"Sesi sejak : %s\nItem terkumpul : %d (%.0f / jam)\nRejoin : %d  •  Hop : %d\nReconnect : %d  •  Stall : %d",
+			tools.formatDuration(uptime), stats.collected, perHour, stats.rejoins, stats.hops, stats.reconnects, stats.stalls
+		)
+		if ui.blackBtn then
+			ui.blackBtn.Text = tools.eco.black and "Layar Hitam: ON" or "Layar Hitam: OFF"
+			ui.blackBtn.BackgroundColor3 = tools.eco.black and THEME.AccentDark or THEME.SurfaceHi
+		end
+		local names = {}
+		for _, preset in ipairs(state.presets) do
+			table.insert(names, preset.name)
+		end
+		local sig = table.concat(names, "|") .. "#" .. tostring(tools.selectedPreset)
+		if sig ~= ui.presetSig then
+			ui.presetSig = sig
+			rebuildPresetList()
+		end
+		ui.presetCount.Text = #state.presets > 0 and string.format("%d preset", #state.presets) or ""
+		if ui.refreshAutomation then
+			ui.refreshAutomation()
+		end
+	end
+	ui.refreshTools()
+end
+
+local function buildAutomationCards(page)
+	local patrol = state.patrol
+
+	local patrolCard = makeCard(page, 7)
+	ui.patrolCount = makeSectionHeader(patrolCard, "PATROL ANTAR SLOT", 1)
+	ui.patrolBtn = makeButton(patrolCard, "Mulai Patrol", THEME.AccentDark)
+	ui.patrolBtn.LayoutOrder = 2
+	connect(ui.patrolBtn.Activated, function()
+		patrol.start()
+	end)
+	makePrefSlider(patrolCard, 3, "Berhenti di tiap slot", "patrolDwell", 1, function(value)
+		return value == 0 and "tanpa jeda" or string.format("%d dtk", value)
+	end)
+	makePrefToggle(patrolCard, 4, "Jalankan Find di tiap slot", "patrolFind")
+	ui.patrolInfo = makeLabel(patrolCard, "", 11, THEME.Muted, false)
+	ui.patrolInfo.LayoutOrder = 5
+	local patrolHint = makeLabel(patrolCard, "Berjalan berurutan ke semua slot posisi di game ini (dari tab Return), berhenti sebentar, lalu lanjut ke slot berikutnya tanpa henti sampai dihentikan. Auto Return dijeda selama Patrol.", 11, THEME.Muted, false)
+	patrolHint.LayoutOrder = 6
+
+	local deliverCard = makeCard(page, 8)
+	makeSectionHeader(deliverCard, "SETOR / DELIVER OTOMATIS", 1)
+	makePrefToggle(deliverCard, 2, "Setor otomatis", "deliverOn")
+	makePrefSlider(deliverCard, 3, "Setor tiap", "deliverItems", 5, function(value)
+		return value == 0 and "jumlah item: nonaktif" or string.format("%d item", value)
+	end)
+	makePrefSlider(deliverCard, 4, "atau tiap", "deliverMinutes", 1, function(value)
+		return value == 0 and "waktu: nonaktif" or string.format("%d menit", value)
+	end)
+	makePrefSlider(deliverCard, 5, "Diam di tujuan", "deliverDwell", 1, function(value)
+		return string.format("%d dtk", value)
+	end)
+	makePrefKey(deliverCard, 6, "Tombol interaksi", "deliverKey")
+	makePrefBox(deliverCard, 7, "Teks ProximityPrompt (opsional, mis. Sell)", "deliverPrompt")
+	local deliverHint = makeLabel(deliverCard, "Dicek setelah tiap item Find. Bila syarat terpenuhi: sesi Find dihentikan, karakter berjalan ke slot bernama 'Setor' / 'Deliver' / 'Jual' / 'Sell' (atau slot terpilih bila tidak ada), menekan tombol / memicu prompt terdekat (maks 40 stud), menunggu, lalu Find dimulai lagi. Cara kerja menyetor berbeda tiap game; sesuaikan tombol atau teks prompt-nya.", 11, THEME.Muted, false)
+	deliverHint.LayoutOrder = 8
+
+	local schedCard = makeCard(page, 9)
+	makeSectionHeader(schedCard, "AKSI TERJADWAL", 1)
+	makePrefToggle(schedCard, 2, "Aksi terjadwal", "schedOn")
+	makePrefSlider(schedCard, 3, "Ulangi tiap", "schedSeconds", 5, function(value)
+		if value >= 60 then
+			return string.format("%d menit %d dtk", math.floor(value / 60), value % 60)
+		end
+		return string.format("%d dtk", value)
+	end)
+	makePrefKey(schedCard, 4, "Tombol yang ditekan", "schedKey")
+	makePrefBox(schedCard, 5, "Teks ProximityPrompt (opsional, mis. Claim)", "schedPrompt")
+	local schedHint = makeLabel(schedCard, "Menekan tombol dan/atau memicu prompt terdekat (maks 40 stud) secara berkala, misalnya klaim hadiah atau gunakan item. Dilewati saat karakter sedang berjalan (Return/Setor).", 11, THEME.Muted, false)
+	schedHint.LayoutOrder = 6
+
+	local watchdogCard = makeCard(page, 10)
+	makeSectionHeader(watchdogCard, "WATCHDOG WINDOWS (EKSTERNAL)", 1)
+	makePrefToggle(watchdogCard, 2, "Tulis heartbeat", "watchdog")
+	local watchdogHint = makeLabel(watchdogCard, "Menulis file " .. CONFIG.DataFolder .. "/heartbeat.json tiap 20 detik (waktu, placeId, jobId, tipe server, status koneksi). Program IsekaiWatchdog.ps1 / .bat di PC Windows membacanya: bila Roblox tertutup, membeku, atau disconnect terlalu lama, Roblox ditutup lalu dibuka lagi lewat roblox://. Setelah dibuka ulang, executor tetap harus menyuntik dan menjalankan script (autoexecute executor Anda).", 11, THEME.Muted, false)
+	watchdogHint.LayoutOrder = 3
+
+	ui.refreshAutomation = function()
+		if state.closed or not ui.patrolBtn then
+			return
+		end
+		ui.patrolBtn.Text = patrol.active and "Stop Patrol" or "Mulai Patrol"
+		ui.patrolBtn.BackgroundColor3 = patrol.active and Color3.fromRGB(190, 110, 30) or THEME.AccentDark
+		ui.patrolCount.Text = patrol.active and "AKTIF" or ""
+		ui.patrolInfo.Text = patrol.active
+			and ("Menuju / di slot: " .. tostring(patrol.current or "-"))
+			or string.format("Slot di game ini: %d", #visibleSlots())
+	end
+	ui.refreshAutomation()
+end
+
+-- Tab NPC (v13.0): Mode NPC (Wander / Patrol / Penjaga) + kembali ke pos + visual jarak + Sapa pemain dekat. Logika ada di modul
+-- state.npc (bagian OTOMASI).
+local function buildNpcTab(page)
+	local npc = state.npc
+
+	local modeCard = makeCard(page, 1)
+	ui.npcCount = makeSectionHeader(modeCard, "MODE NPC", 1)
+	ui.npcBtn = makeButton(modeCard, "Mulai Mode NPC", THEME.AccentDark)
+	ui.npcBtn.LayoutOrder = 2
+	connect(ui.npcBtn.Activated, function()
+		npc.toggle()
+	end)
+	makePrefCycle(modeCard, 3, "Mode", "npcMode", {
+		wander = "Wander (berkeliling)",
+		patrol = "Patrol (antar slot)",
+		guard = "Penjaga (diam di pos)",
+	})
+	makePrefSlider(modeCard, 4, "Radius berkeliling", "npcRadius", 5, function(value)
+		return string.format("%d stud", value)
+	end)
+	makePrefSlider(modeCard, 5, "Diam minimal", "npcDwellMin", 1, function(value)
+		return string.format("%d dtk", value)
+	end)
+	makePrefSlider(modeCard, 6, "Diam maksimal", "npcDwellMax", 1, function(value)
+		return string.format("%d dtk", value)
+	end)
+	makePrefToggle(modeCard, 7, "Menoleh saat diam", "npcLook")
+	makePrefToggle(modeCard, 8, "Tampilkan jarak stud (cincin + label)", "npcShowRange")
+	makePrefToggle(modeCard, 9, "Lanjut otomatis setelah rejoin", "npcResume")
+	makePrefToggle(modeCard, 10, "Kembali ke pos bila lama tidak menyapa", "npcHomeReturn", function()
+		npc.scheduleHome()
+	end)
+	makePrefSlider(modeCard, 11, "Kembali ke pos: paling cepat", "npcHomeMin", 1, function(value)
+		return string.format("%d menit", value)
+	end)
+	makePrefSlider(modeCard, 12, "Kembali ke pos: paling lambat", "npcHomeMax", 1, function(value)
+		return string.format("%d menit", value)
+	end)
+	makePrefSlider(modeCard, 13, "Tunggu di pos", "npcHomeHold", 5, function(value)
+		return string.format("%d dtk", value)
+	end)
+	ui.npcInfo = makeLabel(modeCard, "", 12, THEME.Muted, true)
+	ui.npcInfo.LayoutOrder = 14
+	ui.npcSaveInfo = makeLabel(modeCard, "", 11, THEME.Muted, false)
+	ui.npcSaveInfo.LayoutOrder = 15
+	local modeHint = makeLabel(modeCard, "Wander: berjalan ke titik acak di sekitar pos awal (radius di atas), diam acak, menoleh, lalu ulang. Patrol: berpindah acak antar slot posisi di game ini (tab Return). Penjaga: diam di pos dan kembali bila terdorong. Pos awal = slot bernama 'NPC'; bila tidak ada, slot Return yang sedang dipilih; bila tidak ada juga, posisi saat Mulai. Bila tidak menyapa selama waktu acak antara 'paling cepat' dan 'paling lambat', karakter berjalan kembali ke pos awal dengan arah hadap dan kamera seperti Save Return (teleport cadangan mengikuti pengaturan tab Return), menunggu sebentar, lalu lanjut. Gerak berkeliling tidak pernah teleport: titik yang tak terjangkau dilewati. Menekan WASD / menggerakkan joystick saat diam menghentikan Mode NPC. Auto Return dijeda selama Mode NPC. Cincin hijau = jarak sapa (ikut karakter), cincin kuning = radius berkeliling; label di tiap pemain menunjukkan jaraknya (hijau = dalam jarak sapa, biru = sudah disapa). 'Lanjut otomatis' dan auto-save bekerja lintas rejoin; script sendiri baru jalan lagi setelah rejoin bila Autoexecute (tab Advanced) aktif dan URL-nya menunjuk ke versi ini.", 11, THEME.Muted, false)
+	modeHint.LayoutOrder = 16
+
+	local greetCard = makeCard(page, 2)
+	ui.greetCount = makeSectionHeader(greetCard, "SAPA PEMAIN DEKAT", 1)
+	makePrefToggle(greetCard, 2, "Sapa pemain dekat", "greetOn", function()
+		npc.refresh()
+	end)
+	makePrefSlider(greetCard, 3, "Jarak sapa", "greetDistance", 1, function(value)
+		return string.format("%d stud", value)
+	end)
+	makePrefSlider(greetCard, 4, "Harus berada dekat selama", "greetStay", 1, function(value)
+		return value == 0 and "langsung" or string.format("%d dtk", value)
+	end)
+	makePrefSlider(greetCard, 5, "Jeda antar sapaan", "greetGap", 1, function(value)
+		return string.format("%d dtk", value)
+	end)
+	makePrefSlider(greetCard, 6, "Jeda bila terdeteksi spam / ####", "greetSpamPause", 1, function(value)
+		return string.format("%d dtk", value)
+	end)
+	makePrefCycle(greetCard, 7, "Pakai nama", "greetName", { display = "Display name", username = "Username Roblox" })
+
+	local listTitle = makeLabel(greetCard, "DAFTAR PESAN SAPAAN", 11, THEME.Accent, true)
+	listTitle.LayoutOrder = 8
+	local addRow = makeRow(greetCard, 9, 36)
+	ui.greetAddBox = makeTextBox(addRow, "Tulis pesan, mis. Halo {name}!", UDim2.new(0.68, -4, 1, 0))
+	ui.greetAddBox.LayoutOrder = 1
+	local addBtn = makeButton(addRow, "+ Tambah", THEME.AccentDark, UDim2.new(0.32, -4, 1, 0))
+	addBtn.LayoutOrder = 2
+	connect(addBtn.Activated, function()
+		npc.addGreeting(ui.greetAddBox.Text)
+	end)
+	connect(ui.greetAddBox.FocusLost, function(enterPressed)
+		if enterPressed then
+			npc.addGreeting(ui.greetAddBox.Text)
+		end
+	end)
+	ui.greetListHolder = new("Frame", {
+		Parent = greetCard,
+		LayoutOrder = 10,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+	}, {
+		new("UIListLayout", {
+			Padding = UDim.new(0, 4),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	ui.renderGreetList = function()
+		local holder = ui.greetListHolder
+		if not holder then
+			return
+		end
+		-- Hanya dibangun ulang bila isi daftar berubah (juga dipanggil dari refreshPrefs setelah preset/impor).
+		local signature = table.concat(state.prefs.greetList, "\1")
+		if signature == ui.greetListSig then
+			return
+		end
+		ui.greetListSig = signature
+		for _, child in ipairs(holder:GetChildren()) do
+			if child:IsA("GuiObject") then
+				child:Destroy()
+			end
+		end
+		local list = state.prefs.greetList
+		if #list == 0 then
+			local empty = makeLabel(holder, "Daftar kosong: dipakai pesan bawaan 'Selamat datang {name}!'.", 11, THEME.Muted, false)
+			empty.LayoutOrder = 1
+			return
+		end
+		for index, text in ipairs(list) do
+			local row = new("Frame", {
+				Parent = holder,
+				LayoutOrder = index,
+				Size = UDim2.new(1, 0, 0, 30),
+				BackgroundColor3 = THEME.SurfaceHi,
+				BackgroundTransparency = 0.35,
+			}, { corner(8) })
+			new("TextLabel", {
+				Parent = row,
+				BackgroundTransparency = 1,
+				Position = UDim2.fromOffset(8, 0),
+				Size = UDim2.new(1, -46, 1, 0),
+				Text = string.format("%d. %s", index, text),
+				Font = Enum.Font.Gotham,
+				TextSize = 12,
+				TextColor3 = THEME.Text,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+			})
+			local delBtn = new("TextButton", {
+				Parent = row,
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -4, 0.5, 0),
+				Size = UDim2.fromOffset(28, 22),
+				BackgroundColor3 = Color3.fromRGB(150, 38, 70),
+				AutoButtonColor = true,
+				Text = "✕",
+				Font = Enum.Font.GothamBold,
+				TextSize = 12,
+				TextColor3 = THEME.Text,
+			}, { corner(6) })
+			connect(delBtn.Activated, function()
+				npc.removeGreeting(index)
+			end)
+		end
+	end
+	ui.renderGreetList()
+	table.insert(ui.prefRenders, ui.renderGreetList)
+	makePrefCycle(greetCard, 11, "Urutan pesan", "greetOrder", { random = "Acak", sequential = "Berurutan" })
+	makePrefToggle(greetCard, 12, "Menghadap pemain saat menyapa", "greetFace")
+	makePrefToggle(greetCard, 13, "Emote saat menyapa", "greetEmote")
+	makePrefCycle(greetCard, 14, "Emote", "greetEmoteName", {
+		hello = "Hello (perlu terpasang di avatar; cadangan Wave)",
+		wave = "Wave",
+		cheer = "Cheer",
+		point = "Point",
+		salute = "Salute",
+		applaud = "Applaud",
+		laugh = "Laugh",
+	})
+	makePrefBox(greetCard, 15, "Emote lain (nama persis di roda emote, opsional)", "greetEmoteCustom")
+	ui.emoteTestBtn = makeButton(greetCard, "Tes emote sekarang", THEME.SurfaceHi)
+	ui.emoteTestBtn.LayoutOrder = 16
+	connect(ui.emoteTestBtn.Activated, function()
+		npc.testEmote()
+	end)
+	makePrefToggle(greetCard, 17, "Lewati teman Roblox", "greetSkipFriends")
+	makePrefBox(greetCard, 18, "Abaikan username / display name (pisah koma)", "greetIgnore")
+	ui.greetInfo = makeLabel(greetCard, "", 12, THEME.Muted, true)
+	ui.greetInfo.LayoutOrder = 19
+	ui.greetResetBtn = makeButton(greetCard, "Reset daftar sapa", THEME.SurfaceHi)
+	ui.greetResetBtn.LayoutOrder = 20
+	connect(ui.greetResetBtn.Activated, function()
+		npc.resetGreeted()
+	end)
+	local greetHint = makeLabel(greetCard, "Saat ada pemain lain dalam jarak sapa (dan sudah dekat selama waktu di atas), karakter mengetik di chat game. Tiap pemain hanya disapa SEKALI; baru bisa disapa lagi bila dia keluar lalu masuk lagi (daftar juga bertahan saat kamu rejoin ke server yang sama). Pemain yang antre disapa satu per satu dengan jeda 'antar sapaan'. Pesan dipilih dari daftar: Acak (tidak mengulang pesan yang sama berturut-turut) atau Berurutan. Pengganti: {name} (sesuai 'Pakai nama'), {user} (username), {display} (display name). Bila sapaan terdeteksi spam (status Floodchecked) atau pesanmu muncul sebagai #### di chat, sapa dijeda sesuai slider 'Jeda bila terdeteksi spam' lalu kembali ke jeda 'antar sapaan'; pemain itu disapa ulang (maks. 2-3 kali) dengan pesan lain. Emote: karakter berhenti dulu (emote hanya jalan saat berdiri), lalu emote dimainkan lewat Humanoid:PlayEmote, skrip Animate, atau animasinya langsung. Emote avatar (Hello, Salute, Applaud, dll) harus sudah kamu miliki dan terpasang di roda emote avatar, dan butuh rig R15; bila gagal dipakai Wave (bawaan Roblox). Kolom 'Emote lain' mengisi nama persis dari roda emote (mengganti pilihan di atas). Tekan 'Tes emote sekarang' lalu baca log untuk alasan gagal. Saat menyapa, karakter TERUS menoleh ke pemain yang disapa sampai pesan terkirim, lalu menoleh ke pemain antre berikutnya atau kembali ke arah semula (arah Return bila sedang di pos awal NPC). Yang dikirim adalah chat teks, bukan suara. Bila chat game dimatikan atau gagal 3 kali, sapa dijeda 2 menit.", 11, THEME.Muted, false)
+	greetHint.LayoutOrder = 21
+
+	ui.refreshNpc = function()
+		if state.closed or not ui.npcBtn then
+			return
+		end
+		ui.npcBtn.Text = npc.active and "Stop Mode NPC" or "Mulai Mode NPC"
+		ui.npcBtn.BackgroundColor3 = npc.active and Color3.fromRGB(190, 110, 30) or THEME.AccentDark
+		ui.npcCount.Text = npc.active and "AKTIF" or ""
+		local info = npc.active and ("Status: " .. tostring(npc.status)) or "Mode NPC nonaktif."
+		if npc.active and state.prefs.npcHomeReturn and npc.homeRef then
+			local left = math.max(0, npc.homeAfter - (os.clock() - npc.lastGreetAt))
+			info = info .. string.format(" • kembali ke pos: %s", formatTime(left))
+		end
+		ui.npcInfo.Text = info
+		local storage = state.storage
+		if not storage.available then
+			ui.npcSaveInfo.Text = "Auto-save: TIDAK AKTIF (executor ini tanpa writefile/readfile), pengaturan hilang saat rejoin."
+		else
+			ui.npcSaveInfo.Text = string.format("Auto-save: aktif%s • lanjut otomatis setelah rejoin: %s",
+				storage.lastSavedAt > 0 and (" • tersimpan " .. os.date("%H:%M:%S", storage.lastSavedAt)) or "",
+				state.prefs.npcResume and "ON" or "OFF")
+		end
+		ui.greetCount.Text = state.prefs.greetOn and "ON" or "OFF"
+		local extra = ""
+		local left = npc.pausedUntil - os.clock()
+		if left > 0 then
+			extra = string.format(" • Jeda %d dtk (%s)", math.ceil(left), npc.pauseReason or "gagal kirim")
+		end
+		ui.greetInfo.Text = string.format("Sudah disapa: %d • Antre: %d%s%s", npc.greetedCount, #npc.queue,
+			npc.lastName and (" • Terakhir: " .. npc.lastName) or "", extra)
+	end
+	ui.refreshNpc()
+end
+
+local function buildUI()
+	local gui = new("ScreenGui", {
+		Name = "IsekaiReturnSystem_UI",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = false,
+		DisplayOrder = 1000,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	})
+	resolveGuiParent(gui)
+	ui.gui = gui
+
+	-- Root (draggable container) ------------------------------------------------
+	ui.rootScale = new("UIScale", { Scale = 1 })
+	ui.root = new("Frame", {
+		Parent = gui,
+		Name = "Root",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromOffset(gui.AbsoluteSize.X / 2, gui.AbsoluteSize.Y / 2),
+		Size = UDim2.fromOffset(360, 520),
+		BackgroundTransparency = 1,
+		Visible = false,
+	}, { ui.rootScale })
+
+	new("Frame", {
+		Parent = ui.root,
+		Name = "Shadow",
+		Position = UDim2.fromOffset(-6, 2),
+		Size = UDim2.new(1, 12, 1, 12),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 0.62,
+		ZIndex = 0,
+	}, { corner(24) })
+
+	ui.panel = new("CanvasGroup", {
+		Parent = ui.root,
+		Name = "Panel",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = THEME.Background,
+		BackgroundTransparency = 1,
+		GroupTransparency = 1,
+		ZIndex = 1,
+	}, {
+		corner(20),
+		stroke(THEME.Accent, 1.5, 0.55),
+	})
+	-- Gradient sengaja di frame terpisah: UIGradient pada CanvasGroup akan menggelapkan SEMUA isinya.
+	new("Frame", {
+		Parent = ui.panel,
+		Name = "Glass",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundTransparency = 0.02,
+		ZIndex = 0,
+	}, {
+		new("UIGradient", {
+			Rotation = 135,
+			Color = ColorSequence.new(THEME.BackgroundAlt, THEME.Background),
+		}),
+	})
+
+	-- Header --------------------------------------------------------------------
+	local header = new("Frame", {
+		Parent = ui.panel,
+		Name = "Header",
+		Size = UDim2.new(1, 0, 0, 46),
+		BackgroundColor3 = THEME.SurfaceHi,
+		BackgroundTransparency = 0.35,
+	})
+	new("Frame", {
+		Parent = header,
+		Position = UDim2.fromOffset(14, 19),
+		Size = UDim2.fromOffset(8, 8),
+		BackgroundColor3 = THEME.Accent,
+	}, { corner(4) })
+	new("TextLabel", {
+		Parent = header,
+		Position = UDim2.fromOffset(30, 0),
+		Size = UDim2.new(1, -112, 1, 0),
+		BackgroundTransparency = 1,
+		Text = CONFIG.Title,
+		Font = Enum.Font.GothamBold,
+		TextSize = 14,
+		TextColor3 = THEME.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	})
+	new("Frame", {
+		Parent = header,
+		Position = UDim2.new(0, 0, 1, -1),
+		Size = UDim2.new(1, 0, 0, 1),
+		BackgroundColor3 = THEME.Accent,
+		BackgroundTransparency = 0.7,
+	})
+	local controls = new("Frame", {
+		Parent = header,
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -10, 0.5, 0),
+		Size = UDim2.fromOffset(64, 28),
+		BackgroundTransparency = 1,
+	}, {
+		new("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			Padding = UDim.new(0, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	ui.minimizeBtn = makeButton(controls, "−", THEME.SurfaceHi, UDim2.fromOffset(28, 28))
+	ui.minimizeBtn.TextSize = 18
+	ui.minimizeBtn.LayoutOrder = 1
+	ui.closeBtn = makeButton(controls, "✕", Color3.fromRGB(150, 38, 70), UDim2.fromOffset(28, 28))
+	ui.closeBtn.LayoutOrder = 2
+
+	-- Tab bar -------------------------------------------------------------------
+	local tabBar = new("ScrollingFrame", {
+		Parent = ui.panel,
+		Name = "Tabs",
+		Position = UDim2.fromOffset(12, 54),
+		Size = UDim2.new(1, -24, 0, 32),
+		BackgroundTransparency = 1,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.X,
+		ScrollingDirection = Enum.ScrollingDirection.X,
+		ScrollBarThickness = 0,
+	}, {
+		new("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			Padding = UDim.new(0, 6),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	ui.tabBtns = {}
+	for index, tab in ipairs(TABS) do
+		local button = makeButton(tabBar, tab.label, THEME.SurfaceHi, UDim2.fromOffset(74, 32))
+		button.LayoutOrder = index
+		ui.tabBtns[tab.id] = button
+	end
+
+	-- Status bar (satu baris, tampil di semua tab) ------------------------------
+	local statusBar = new("Frame", {
+		Parent = ui.panel,
+		Name = "StatusBar",
+		Position = UDim2.fromOffset(12, 91),
+		Size = UDim2.new(1, -24, 0, 26),
+		BackgroundColor3 = THEME.Surface,
+		BackgroundTransparency = 0.25,
+	}, {
+		corner(8),
+		padding(10, 0, 10, 0),
+	})
+	ui.statusLine = new("TextLabel", {
+		Parent = statusBar,
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Text = state.statusText,
+		Font = Enum.Font.GothamBold,
+		TextSize = 12,
+		TextColor3 = THEME.Info,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	})
+
+	-- Halaman (satu per tab) ----------------------------------------------------
+	ui.pages = {}
+	local function makePage(id)
+		local page = new("ScrollingFrame", {
+			Parent = ui.panel,
+			Name = "Page_" .. id,
+			Position = UDim2.fromOffset(0, 124),
+			Size = UDim2.new(1, 0, 1, -124),
+			BackgroundTransparency = 1,
+			CanvasSize = UDim2.new(),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+			ScrollingDirection = Enum.ScrollingDirection.Y,
+			ScrollBarThickness = 3,
+			ScrollBarImageColor3 = THEME.Accent,
+			Visible = false,
+		}, {
+			padding(12, 4, 12, 12),
+			new("UIListLayout", {
+				Padding = UDim.new(0, 10),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+			}),
+		})
+		ui.pages[id] = page
+		return page
+	end
+	local returnPage = makePage("return")
+	local findPage = makePage("find")
+	local afkPage = makePage("afk")
+	local advancedPage = makePage("advanced")
+	local serverPage = makePage("server")
+	local toolsPage = makePage("tools")
+	local npcPage = makePage("npc")
+
+	ui.selectTab = function(id)
+		state.tab = id
+		for tabId, page in pairs(ui.pages) do
+			page.Visible = tabId == id
+			ui.tabBtns[tabId].BackgroundColor3 = tabId == id and THEME.AccentDark or THEME.SurfaceHi
+		end
+	end
+
+	-- Geser tab bar agar tab terpilih terlihat, dan tab tak dikenal jatuh ke Return.
+	local baseSelectTab = ui.selectTab
+	ui.selectTab = function(id)
+		if not ui.pages[id] then
+			id = "return"
+		end
+		baseSelectTab(id)
+		pcall(function()
+			local button = ui.tabBtns[id]
+			local target = button.AbsolutePosition.X - tabBar.AbsolutePosition.X + tabBar.CanvasPosition.X - (tabBar.AbsoluteSize.X - button.AbsoluteSize.X) / 2
+			tabBar.CanvasPosition = Vector2.new(math.max(0, target), 0)
+		end)
+	end
+
+	--==========================  TAB RETURN  ==================================--
+	local statusCard = makeCard(returnPage, 1)
+	makeSectionHeader(statusCard, "STATUS", 1)
+	ui.statusInfo = makeLabel(statusCard, "", 12, THEME.Muted, false)
+	ui.statusInfo.LayoutOrder = 2
+
+	-- Positions card ------------------------------------------------------------
+	local posCard = makeCard(returnPage, 2)
+	ui.countLabel = makeSectionHeader(posCard, "POSITIONS", 1)
+
+	local inputRow = makeRow(posCard, 2, 36)
+	ui.nameBox = makeTextBox(inputRow, "Nama slot (opsional)", UDim2.new(1, -96, 1, 0))
+	ui.nameBox.LayoutOrder = 1
+	ui.saveBtn = makeButton(inputRow, "Save", THEME.AccentDark, UDim2.fromOffset(88, 36))
+	ui.saveBtn.LayoutOrder = 2
+
+	ui.slotList = new("ScrollingFrame", {
+		Parent = posCard,
+		LayoutOrder = 3,
+		Size = UDim2.new(1, 0, 0, 132),
+		BackgroundColor3 = Color3.fromRGB(14, 10, 24),
+		BackgroundTransparency = 0.25,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = THEME.Accent,
+	}, {
+		corner(10),
+		stroke(THEME.Border, 1, 0.6),
+		padding(6, 6, 6, 6),
+		new("UIListLayout", {
+			Padding = UDim.new(0, 6),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	ui.emptyLabel = new("TextLabel", {
+		Parent = ui.slotList,
+		Size = UDim2.new(1, 0, 0, 40),
+		BackgroundTransparency = 1,
+		Text = "Belum ada posisi tersimpan.",
+		Font = Enum.Font.Gotham,
+		TextSize = 12,
+		TextColor3 = THEME.Muted,
+		LayoutOrder = 0,
+	})
+
+	local actions = new("Frame", {
+		Parent = posCard,
+		LayoutOrder = 4,
+		Size = UDim2.new(1, 0, 0, 36),
+		BackgroundTransparency = 1,
+	}, {
+		new("UIGridLayout", {
+			CellSize = UDim2.new(1 / 3, -6, 1, 0),
+			CellPadding = UDim2.fromOffset(8, 0),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	ui.returnBtn = makeButton(actions, "Return", THEME.AccentDark)
+	ui.returnBtn.LayoutOrder = 1
+	ui.deleteBtn = makeButton(actions, "Delete", Color3.fromRGB(150, 38, 70))
+	ui.deleteBtn.LayoutOrder = 2
+	ui.deleteAllBtn = makeButton(actions, "Delete All", Color3.fromRGB(92, 30, 58))
+	ui.deleteAllBtn.LayoutOrder = 3
+
+	-- Auto Return card ----------------------------------------------------------
+	local autoCard = makeCard(returnPage, 3)
+	makeSectionHeader(autoCard, "AUTO RETURN", 1)
+	ui.autoBtn = makeButton(autoCard, "Auto Return: OFF", THEME.SurfaceHi)
+	ui.autoBtn.LayoutOrder = 2
+	ui.speedSlider = makeSlider(autoCard, 3, "Kecepatan jalan", CONFIG.SpeedMin, CONFIG.SpeedMax, 5, state.walkSpeedPct,
+		function(value)
+			return string.format("%d%%", value)
+		end,
+		function(value)
+			state.walkSpeedPct = value
+		end,
+		function()
+			persistSavedData()
+			notify(string.format("Kecepatan jalan disimpan: %d%%", state.walkSpeedPct), "info")
+		end
+	)
+	ui.delaySlider = makeSlider(autoCard, 4, "Jeda sebelum jalan (Auto Return)", 0, CONFIG.DelayMax, 1, state.autoDelay,
+		function(value)
+			return value == 0 and "tanpa jeda" or string.format("%d dtk", value)
+		end,
+		function(value)
+			state.autoDelay = value
+		end,
+		function()
+			persistSavedData()
+			notify(string.format("Jeda Auto Return disimpan: %d detik", state.autoDelay), "info")
+		end
+	)
+	ui.triggerSlider = makeSlider(autoCard, 5, "Jarak deteksi geser", CONFIG.TriggerMin, CONFIG.TriggerMax, 0.5, state.autoTrigger,
+		function(value)
+			return string.format("%.1f stud", value)
+		end,
+		function(value)
+			state.autoTrigger = value
+		end,
+		function()
+			persistSavedData()
+			notify(string.format("Jarak deteksi Auto Return disimpan: %.1f stud", state.autoTrigger), "info")
+		end
+	)
+	local autoHint = makeLabel(autoCard, "Selama aktif, jika karakter bergeser lebih jauh dari jarak deteksi dari slot terpilih (respawn, terdorong, dsb.), karakter menunggu jeda (diacak ±20%) lalu berjalan kembali seperti Return manual. Kecepatan berlaku juga untuk Return manual. Auto Return dijeda selama Find berjalan.", 11, THEME.Muted, false)
+	autoHint.LayoutOrder = 6
+
+	-- Teleport otomatis (cadangan) ---------------------------------------------------------------
+	local returnTpCard = makeCard(returnPage, 4)
+	makeSectionHeader(returnTpCard, "TELEPORT OTOMATIS (CADANGAN)", 1)
+	makePrefToggle(returnTpCard, 2, "Teleport otomatis", "returnTpEnabled")
+	makePrefSlider(returnTpCard, 3, "Batas waktu jalan sebelum teleport", "returnTpSeconds", 5, function(value)
+		return string.format("%d dtk", value)
+	end, function(value)
+		notify(string.format("Batas waktu jalan Return: %d detik", value), "info")
+	end)
+	local returnTpHint = makeLabel(returnTpCard, "Bila setelah batas waktu karakter belum sampai dan masih jauh / tersangkut, karakter dipindah langsung ke slot (batas mutlak = waktu x 1,25 bila masih bergerak mendekat). Toggle OFF: tidak pernah teleport, perjalanan dihentikan saat waktu habis.", 11, THEME.Muted, false)
+	returnTpHint.LayoutOrder = 4
+
+	--==========================  TAB FIND  ====================================--
+	-- Kontrol utama (Scan / Start / ESP / Loop) ada paling atas.
+	local findCard = makeCard(findPage, 1)
+	ui.findCount = makeSectionHeader(findCard, "FIND", 1)
+	local findRow = makeRow(findCard, 2, 38)
+	ui.scanBtn = makeButton(findRow, "Scan", THEME.SurfaceHi, UDim2.new(0.4, -4, 1, 0))
+	ui.scanBtn.LayoutOrder = 1
+	ui.findStartBtn = makeButton(findRow, "Start Find", THEME.AccentDark, UDim2.new(0.6, -4, 1, 0))
+	ui.findStartBtn.LayoutOrder = 2
+	local toggleRow = makeRow(findCard, 3, 36)
+	ui.espBtn = makeButton(toggleRow, "ESP: OFF", THEME.SurfaceHi, UDim2.new(0.5, -4, 1, 0))
+	ui.espBtn.LayoutOrder = 1
+	ui.findLoopBtn = makeButton(toggleRow, "Loop Find: OFF", THEME.SurfaceHi, UDim2.new(0.5, -4, 1, 0))
+	ui.findLoopBtn.LayoutOrder = 2
+	ui.findResult = makeLabel(findCard, state.find.statusText, 12, THEME.Text, true)
+	ui.findResult.LayoutOrder = 4
+
+	-- Daftar hasil + total jumlah.
+	local resultCard = makeCard(findPage, 2)
+	ui.resultCount = makeSectionHeader(resultCard, "HASIL SCAN", 1)
+	ui.resultSummary = makeLabel(resultCard, "Belum dipindai. Tekan Scan atau nyalakan ESP.", 11, THEME.Muted, false)
+	ui.resultSummary.LayoutOrder = 2
+	ui.resultList = new("ScrollingFrame", {
+		Parent = resultCard,
+		LayoutOrder = 3,
+		Size = UDim2.new(1, 0, 0, 150),
+		BackgroundColor3 = Color3.fromRGB(14, 10, 24),
+		BackgroundTransparency = 0.25,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = THEME.Accent,
+	}, {
+		corner(10),
+		stroke(THEME.Border, 1, 0.6),
+		padding(8, 6, 8, 6),
+		new("UIListLayout", {
+			Padding = UDim.new(0, 2),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	ui.resultEmpty = new("TextLabel", {
+		Parent = ui.resultList,
+		Size = UDim2.new(1, 0, 0, 40),
+		BackgroundTransparency = 1,
+		Text = "Belum ada item.",
+		Font = Enum.Font.Gotham,
+		TextSize = 12,
+		TextColor3 = THEME.Muted,
+		LayoutOrder = 0,
+	})
+
+	-- Kategori (kata kunci nama) + manual.
+	local categoryCard = makeCard(findPage, 3)
+	makeSectionHeader(categoryCard, "KATEGORI", 1)
+	local chipGrid = new("Frame", {
+		Parent = categoryCard,
+		LayoutOrder = 2,
+		Size = UDim2.new(1, 0, 0, 80),
+		BackgroundTransparency = 1,
+	}, {
+		new("UIGridLayout", {
+			CellSize = UDim2.new(1 / 3, -6, 0, 36),
+			CellPadding = UDim2.fromOffset(8, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	ui.findChips = {}
+	for index, category in ipairs(FIND_CATEGORIES) do
+		local chip = makeButton(chipGrid, category.label, THEME.SurfaceHi)
+		chip.LayoutOrder = index
+		ui.findChips[category.id] = chip
+		connect(chip.Activated, function()
+			state.find.categories[category.id] = not state.find.categories[category.id]
+			onScanCriteriaChanged()
+			notify(category.label .. " filter " .. (state.find.categories[category.id] and "ON." or "OFF."), "info")
+		end)
+	end
+	ui.findBox = makeTextBox(categoryCard, "Cari manual: nama objek (pisah koma)", UDim2.new(1, 0, 0, 36))
+	ui.findBox.LayoutOrder = 3
+	ui.findBox.Text = state.find.custom
+
+	-- Filter tipe: jenis objek + pemicu ambil.
+	local typeCard = makeCard(findPage, 4)
+	makeSectionHeader(typeCard, "FILTER TIPE ITEM", 1)
+	local kindLabel = makeLabel(typeCard, "Jenis objek (angka = jumlah hasil scan)", 11, THEME.Muted, false)
+	kindLabel.LayoutOrder = 2
+	local kindGrid = new("Frame", {
+		Parent = typeCard,
+		LayoutOrder = 3,
+		Size = UDim2.new(1, 0, 0, 36),
+		BackgroundTransparency = 1,
+	}, {
+		new("UIGridLayout", {
+			CellSize = UDim2.new(1 / 3, -6, 0, 36),
+			CellPadding = UDim2.fromOffset(8, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	ui.kindChips = {}
+	for index, kind in ipairs(FIND_KINDS) do
+		local chip = makeButton(kindGrid, kind.label, THEME.SurfaceHi)
+		chip.LayoutOrder = index
+		ui.kindChips[kind.id] = chip
+		connect(chip.Activated, function()
+			state.find.kinds[kind.id] = not state.find.kinds[kind.id]
+			onFilterChanged()
+			notify("Filter jenis " .. kind.label .. ": " .. (state.find.kinds[kind.id] and "ON." or "OFF."), "info")
+		end)
+	end
+	local triggerLabel = makeLabel(typeCard, "Cara item diambil (matikan \"Tanpa pemicu\" agar hanya item yang benar-benar bisa diambil)", 11, THEME.Muted, false)
+	triggerLabel.LayoutOrder = 4
+	local triggerGrid = new("Frame", {
+		Parent = typeCard,
+		LayoutOrder = 5,
+		Size = UDim2.new(1, 0, 0, 80),
+		BackgroundTransparency = 1,
+	}, {
+		new("UIGridLayout", {
+			CellSize = UDim2.new(0.5, -5, 0, 36),
+			CellPadding = UDim2.fromOffset(8, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	ui.triggerChips = {}
+	for index, trigger in ipairs(FIND_TRIGGERS) do
+		local chip = makeButton(triggerGrid, trigger.label, THEME.SurfaceHi)
+		chip.LayoutOrder = index
+		ui.triggerChips[trigger.id] = chip
+		connect(chip.Activated, function()
+			state.find.triggers[trigger.id] = not state.find.triggers[trigger.id]
+			-- "Tanpa pemicu" mengubah cara scan (pencocokan lewat Model induk); minta scan ulang.
+			if trigger.id == "plain" then
+				esp.nextScan = 0
+			end
+			onFilterChanged()
+			notify("Filter pemicu " .. trigger.label .. ": " .. (state.find.triggers[trigger.id] and "ON." or "OFF."), "info")
+		end)
+	end
+
+	-- Navigasi.
+	local navCard = makeCard(findPage, 5)
+	makeSectionHeader(navCard, "NAVIGASI", 1)
+	local avoidRow = makeRow(navCard, 2, 36)
+	ui.avoidWaterBtn = makeButton(avoidRow, "Hindari Air", THEME.SurfaceHi, UDim2.new(0.5, -4, 1, 0))
+	ui.avoidWaterBtn.LayoutOrder = 1
+	ui.avoidHazardBtn = makeButton(avoidRow, "Hindari Bahaya", THEME.SurfaceHi, UDim2.new(0.5, -4, 1, 0))
+	ui.avoidHazardBtn.LayoutOrder = 2
+	local jumpRow = makeRow(navCard, 3, 36)
+	ui.findHighJumpBtn = makeButton(jumpRow, "Jump Coin/Gold: ON", THEME.AccentDark, UDim2.new(0.5, -4, 1, 0))
+	ui.findHighJumpBtn.LayoutOrder = 1
+	ui.findModeBtn = makeButton(jumpRow, "Mode: BERJALAN", THEME.SurfaceHi, UDim2.new(0.5, -4, 1, 0))
+	ui.findModeBtn.LayoutOrder = 2
+
+	ui.findStandoffSlider = makeSlider(navCard, 4, "Jarak teleport dari item", CONFIG.FindStandoffMin, CONFIG.FindStandoffMax, 1, state.find.standoff,
+		function(value)
+			return string.format("%d stud", value)
+		end,
+		function(value)
+			state.find.standoff = value
+		end,
+		function()
+			persistSavedData()
+			notify(string.format("Jarak teleport Find disimpan: %d stud", state.find.standoff), "info")
+		end
+	)
+	ui.findSpeedSlider = makeSlider(navCard, 5, "Kecepatan Find", CONFIG.SpeedMin, CONFIG.SpeedMax, 5, state.find.speedPct,
+		function(value)
+			return string.format("%d%%", value)
+		end,
+		function(value)
+			state.find.speedPct = value
+			-- Berlaku langsung walau Find sedang berjalan.
+			local walk = state.walk
+			if state.find.running and walk and walk.humanoid and walk.humanoid.Parent then
+				walk.pct = value
+				applySpeedFactor(1)
+			end
+		end,
+		function()
+			persistSavedData()
+			notify(string.format("Kecepatan Find disimpan: %d%%", state.find.speedPct), "info")
+		end
+	)
+
+	local rescanRow = makeRow(navCard, 6, 36)
+	ui.rescanBtn = makeButton(rescanRow, "Scan Ulang Tiap Item: ON", THEME.AccentDark, UDim2.new(1, 0, 1, 0))
+
+	makePrefToggle(navCard, 7, "Teleport otomatis (target macet)", "findTpEnabled")
+	makePrefSlider(navCard, 8, "Batas waktu per item sebelum teleport", "findTpSeconds", 1, function(value)
+		return string.format("%d dtk", value)
+	end, function(value)
+		notify(string.format("Batas waktu per item Find: %d detik", value), "info")
+	end)
+	local findTpHint = makeLabel(navCard, "Bila item belum terambil setelah batas waktu, karakter dipindah ke dekat item (jarak sesuai slider di atas). Toggle OFF: item yang macet dilewati tanpa teleport.", 11, THEME.Muted, false)
+	findTpHint.LayoutOrder = 9
+
+	-- Auto interaksi per kategori.
+	local interactCard = makeCard(findPage, 6)
+	makeSectionHeader(interactCard, "AUTO INTERAKSI", 1)
+	local interactHeader = makeLabel(interactCard, "Toggle mengaktifkan, tombol Key untuk custom keybind per kategori", 11, THEME.Muted, false)
+	interactHeader.LayoutOrder = 2
+	ui.findInteractBtns = {}
+	ui.findKeyBtns = {}
+	for index, category in ipairs(FIND_CATEGORIES) do
+		local interactionRow = makeRow(interactCard, 2 + index, 32)
+		local interactBtn = makeButton(interactionRow, category.label .. " Auto: OFF", THEME.SurfaceHi, UDim2.new(0.58, -4, 1, 0))
+		interactBtn.LayoutOrder = 1
+		local keyBtn = makeButton(interactionRow, "Key: E", THEME.SurfaceHi, UDim2.new(0.42, -4, 1, 0))
+		keyBtn.LayoutOrder = 2
+		ui.findInteractBtns[category.id] = interactBtn
+		ui.findKeyBtns[category.id] = keyBtn
+		connect(interactBtn.Activated, function()
+			state.find.interactEnabled[category.id] = not state.find.interactEnabled[category.id]
+			persistSavedData()
+			refreshFindUI()
+			notify("Auto interaksi " .. category.label .. " " .. (state.find.interactEnabled[category.id] and "ON." or "OFF."), "info")
+		end)
+		connect(keyBtn.Activated, function()
+			state.capturingKey = false
+			state.capturingFindKey = category.id
+			refreshFindUI()
+			notify("Keybind " .. category.label .. ": tekan tombol keyboard baru (Esc untuk batal).", "info")
+		end)
+	end
+
+	-- Prioritas & blacklist ---------------------------------------------------------------------------------
+	local priorityCard = makeCard(findPage, 7)
+	makeSectionHeader(priorityCard, "PRIORITAS & BLACKLIST", 1)
+	makePrefBox(priorityCard, 2, "Prioritas (urut, pisah koma): gold, coin", "findPriority")
+	makePrefBox(priorityCard, 3, "Blacklist nama objek (pisah koma)", "findBlacklist", function()
+		onScanCriteriaChanged()
+	end)
+	local priorityHint = makeLabel(priorityCard, "Kata pertama paling diutamakan: item berkategori/nama itu didahulukan walau sedikit lebih jauh (bonus " .. CONFIG.PriorityStep .. " stud per peringkat). Blacklist: objek yang namanya mengandung kata itu tidak ikut hasil scan.", 11, THEME.Muted, false)
+	priorityHint.LayoutOrder = 4
+
+	local espCard = makeCard(findPage, 8)
+	makeSectionHeader(espCard, "ESP LANJUTAN", 1)
+	makePrefToggle(espCard, 2, "Garis penunjuk (tracer)", "espTracer")
+	makePrefToggle(espCard, 3, "Penghitung item di layar", "espCounter")
+	makePrefSlider(espCard, 4, "Jarak maksimum ESP", "espMaxDist", 50, function(value)
+		return value == 0 and "tanpa batas" or string.format("%d stud", value)
+	end)
+	local findHint = makeLabel(findPage, "Scan menghitung item; Start Find memproses yang terdekat dulu. Mode TELEPORT tidak langsung ke item: karakter dipindah ke titik beberapa stud dari item, lalu berjalan / loncat / berenang mendekat dan bolak-balik melewati item sampai terambil. Item di air didekati dengan berenang (matikan Hindari Air). ESP menandai item di layar. Waktu per item mengikuti slider Teleport Otomatis (bawaan 15 detik). Tombol gerak (WASD) atau Stop membatalkan.", 11, THEME.Muted, false)
+	findHint.LayoutOrder = 9
+
+	--==========================  TAB AFK  =====================================--
+	local afkCard = makeCard(afkPage, 1)
+	makeSectionHeader(afkCard, "ANTI-AFK", 1)
+	ui.afkBtn = makeButton(afkCard, "Anti-AFK: OFF", THEME.SurfaceHi)
+	ui.afkBtn.LayoutOrder = 2
+	local afkRow = makeRow(afkCard, 3, 36)
+	ui.keyBtn = makeButton(afkRow, "Keybind", THEME.SurfaceHi, UDim2.new(0.5, -4, 1, 0))
+	ui.keyBtn.LayoutOrder = 1
+	ui.durationBox, ui.durationStroke = makeTextBox(afkRow, "Interval menit (maks 19)", UDim2.new(0.5, -4, 1, 0))
+	ui.durationBox.LayoutOrder = 2
+	ui.durationBox.Text = tostring(state.afk.minutes)
+	ui.applyDurationBtn = makeButton(afkCard, "Set Interval", THEME.AccentDark)
+	ui.applyDurationBtn.LayoutOrder = 4
+	ui.afkCountdown = makeLabel(afkCard, "Tekan berikutnya: --:--", 12, THEME.Text, true)
+	ui.afkCountdown.LayoutOrder = 5
+	local afkNote = makeLabel(afkCard, "Tombol terpilih ditekan sekali saat dinyalakan (tes), lalu diulang tiap interval sampai dimatikan. Tidak menjamin bebas dari semua sistem idle atau kebijakan server.", 11, THEME.Muted, false)
+	afkNote.LayoutOrder = 6
+
+	--==========================  TAB ADVANCED  ================================--
+	local autoExecCard = makeCard(advancedPage, 1)
+	makeSectionHeader(autoExecCard, "AUTOEXECUTE SAAT TELEPORT / REJOIN", 1)
+	ui.autoExecuteBtn = makeButton(autoExecCard, "Autoexecute: OFF", THEME.SurfaceHi)
+	ui.autoExecuteBtn.LayoutOrder = 2
+	ui.autoExecuteUrlBox = makeTextBox(autoExecCard, "URL raw script (https://...)", UDim2.new(1, 0, 0, 36))
+	ui.autoExecuteUrlBox.LayoutOrder = 3
+	ui.autoExecuteUrlBox.Text = state.advanced.scriptUrl
+	ui.autoExecuteSaveBtn = makeButton(autoExecCard, "Simpan URL", THEME.AccentDark)
+	ui.autoExecuteSaveBtn.LayoutOrder = 4
+	ui.autoExecuteHint = makeLabel(autoExecCard, "Perlu executor yang menyediakan queue_on_teleport dan URL raw script yang bisa diakses. Saat ON, script akan dimuat ulang setelah teleport, lalu menyiapkan antrean untuk teleport berikutnya. Ini tidak dapat menjamin auto-run setelah menutup Roblox secara manual.", 11, THEME.Muted, false)
+	ui.autoExecuteHint.LayoutOrder = 5
+
+	local antiStuckCard = makeCard(advancedPage, 2)
+	makeSectionHeader(antiStuckCard, "ANTI-SIT / ANTI-STUCK", 1)
+	ui.antiStuckBtn = makeButton(antiStuckCard, "Anti-Stuck: ON", THEME.AccentDark)
+	ui.antiStuckBtn.LayoutOrder = 2
+	local antiStuckNote = makeLabel(antiStuckCard, "Anti-Stuck memulihkan PlatformStand/FallingDown/Ragdoll, memberi lompatan pemulihan bila ada input gerak tetapi posisi tidak berubah, dan memindahkan karakter KELUAR bila tertanam di batu/dinding/tanah (deteksi lewat tumpang tindih benda + voxel terrain; bukan sekadar berputar di dalam).", 11, THEME.Muted, false)
+	antiStuckNote.LayoutOrder = 3
+
+	makePrefToggle(antiStuckCard, 4, "Anti-Sit (matikan kursi otomatis)", "antiSit", function()
+		if state.hooks.applyAntiSit then
+			state.hooks.applyAntiSit()
+		end
+	end)
+	local antiSitNote = makeLabel(antiStuckCard, "Anti-Sit mematikan Seat/VehicleSeat (dan prompt 'Sit/Duduk') hanya di sisi client, jadi berjalan atau berdiri di bangku tidak membuat karakter duduk otomatis, dan karakter TIDAK meloncat. Kursi yang sedang diduduki baru dimatikan setelah karakter berdiri. Bila tetap terduduk (kursi custom / dipaksa pemain lain), Sit=false dan SeatWeld dilepas SEKETIKA lewat event (bukan menunggu polling), state Seated dimatikan, lalu karakter digeser sedikit ke atas bila perlu. Server game masih bisa mendudukkan lagi lewat script-nya sendiri; client hanya melepasnya kembali secepat mungkin.", 11, THEME.Muted, false)
+	antiSitNote.LayoutOrder = 5
+
+	makePrefToggle(antiStuckCard, 6, "Blokir remote Sit/Seat/Duduk", "antiSitRemotes", function()
+		if state.hooks.applyAntiSit then
+			state.hooks.applyAntiSit()
+		end
+	end)
+	makePrefBox(antiStuckCard, 7, "Kata tambahan nama remote (pisah koma, mis: grobak,cart)", "antiSitWords", function()
+		if state.hooks.applyAntiSit then
+			state.hooks.applyAntiSit()
+		end
+	end)
+	antiSitNote = makeLabel(antiStuckCard, "Blokir remote mematikan RemoteEvent/RemoteFunction yang namanya mengandung sit, seat, duduk, kursi, chair atau bangku (ditambah kata dari kotak di atas) langsung di client lewat getconnections, jadi perintah 'duduk' dari server/pemain lain lewat remote itu tidak dijalankan. Dicek ulang tiap 1 detik. Butuh executor dengan getconnections; bila tidak ada, lapis reaksi tetap jalan. Hati-hati: kata tambahan yang terlalu umum bisa mematikan fitur game yang sah.", 11, THEME.Muted, false)
+	antiSitNote.LayoutOrder = 8
+
+	local naturalCard = makeCard(advancedPage, 3)
+	makeSectionHeader(naturalCard, "GERAK NATURAL (MIMIC)", 1)
+	ui.naturalBtn = makeButton(naturalCard, "Gerak Natural: ON", THEME.AccentDark)
+	ui.naturalBtn.LayoutOrder = 2
+	local naturalNote = makeLabel(naturalCard, "Berlaku untuk Return, Auto Return, dan Find. Karakter memotong tikungan rute, berkelok serong tipis, memvariasikan kecepatan, dan sesekali loncat kecil. Pemulihan tersangkut mencoba loncat, menyamping, rute ulang, mundur, lalu memutar. Gerakan tetap bergantung pada pathfinding dan aturan fisika game.", 11, THEME.Muted, false)
+	naturalNote.LayoutOrder = 3
+
+	local rejoinCard = makeCard(advancedPage, 4)
+	makeSectionHeader(rejoinCard, "AUTO REJOIN / TIMER MANUAL", 1)
+	ui.autoRejoinBtn = makeButton(rejoinCard, "Auto Rejoin: ON", THEME.AccentDark)
+	ui.autoRejoinBtn.LayoutOrder = 2
+	local rejoinNote = makeLabel(rejoinCard, "Auto Rejoin aktif setelah Find berhasil mengambil minimal satu item lalu semua target pilihan habis/tidak terlihat; juga dipicu oleh 3 Coin/Gold gagal berturut-turut atau 5 target umum gagal berturut-turut. Loop Find perlu beberapa scan kosong berturut-turut. Rejoin tidak bisa mengetahui limit internal game bila tidak ada indikator yang terlihat dari client. Pastikan sesuai aturan game/server.", 11, THEME.Muted, false)
+	rejoinNote.LayoutOrder = 3
+	local timerRow = makeRow(rejoinCard, 4, 36)
+	ui.rejoinMinutesBox = makeTextBox(timerRow, "Durasi menit (1–1440)", UDim2.new(0.32, -4, 1, 0))
+	ui.rejoinMinutesBox.LayoutOrder = 1
+	ui.rejoinTimerBtn = makeButton(timerRow, "Mulai Timer", THEME.SurfaceHi, UDim2.new(0.42, -4, 1, 0))
+	ui.rejoinTimerBtn.LayoutOrder = 2
+	ui.rejoinNowBtn = makeButton(timerRow, "Rejoin Now", Color3.fromRGB(150, 38, 70), UDim2.new(0.26, -4, 1, 0))
+	ui.rejoinNowBtn.LayoutOrder = 3
+	ui.rejoinCountdown = makeLabel(rejoinCard, "Timer rejoin: OFF", 12, THEME.Muted, true)
+	ui.rejoinCountdown.LayoutOrder = 5
+	ui.rejoinMinutesBox.Text = tostring(state.rejoin.manualMinutes)
+	makePrefToggle(rejoinCard, 6, "Kunci server sama (semua rejoin)", "rejoinSameLock")
+	rejoinNote = makeLabel(rejoinCard, "Kunci server sama ON: Rejoin Now, Timer manual, Auto Rejoin, auto reconnect, stall, ping, dan batas sesi selalu kembali ke server yang sama (JobId sekarang), tidak pindah ke server lain. Quick Join / Join Terpilih di tab Server tetap pindah karena dipilih sendiri. Bila server tidak bisa dimasuki lagi (ditutup, penuh, atau kamu sendirian di server), script mencoba ulang maks. 3 kali lalu berhenti dan tetap di server ini. Pengaturan ini sama dengan yang ada di tab Server. Timer manual BERULANG: setelah rejoin (script jalan lagi lewat Autoexecute) timer otomatis menghitung ulang dari awal, seperti Anti-AFK, sampai kamu menekan Stop Timer.", 11, THEME.Muted, false)
+	rejoinNote.LayoutOrder = 7
+
+	local audioCard = makeCard(advancedPage, 5)
+	makeSectionHeader(audioCard, "AUDIO LANGKAH", 1)
+	ui.footstepBtn = makeButton(audioCard, "Footstep Sound Assist: ON", THEME.AccentDark)
+	ui.footstepBtn.LayoutOrder = 2
+	local footstepNote = makeLabel(audioCard, "Memantau Humanoid.Running dan membantu memutar Sound bernama 'Running' yang sudah ada pada HumanoidRootPart saat karakter bergerak. Tidak menambahkan audio baru. Jika game memakai suara langkah custom atau Sound itu tidak tersedia, bantuan ini tidak bisa menggantikan sistem audio game.", 11, THEME.Muted, false)
+	footstepNote.LayoutOrder = 3
+
+	buildServerTab(serverPage)
+	buildToolsTab(toolsPage)
+	buildAutomationCards(toolsPage)
+	buildNpcTab(npcPage)
+
+	for tabId, button in pairs(ui.tabBtns) do
+		connect(button.Activated, function()
+			ui.selectTab(tabId)
+		end)
+	end
+	ui.selectTab(state.tab)
+
+	-- Confirm overlay -----------------------------------------------------------
+	ui.confirmOverlay = new("Frame", {
+		Parent = ui.panel,
+		Name = "Confirm",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 0.4,
+		Active = true,
+		Visible = false,
+		ZIndex = 20,
+	})
+	local confirmCard = new("Frame", {
+		Parent = ui.confirmOverlay,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(0.86, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = THEME.Surface,
+		BackgroundTransparency = 0.02,
+		ZIndex = 21,
+	}, {
+		corner(16),
+		stroke(THEME.Accent, 1.2, 0.3),
+		padding(14, 14, 14, 14),
+		new("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }),
+	})
+	ui.confirmMessage = makeLabel(confirmCard, "", 13, THEME.Text, true)
+	ui.confirmMessage.LayoutOrder = 1
+	ui.confirmMessage.ZIndex = 22
+	local confirmRow = makeRow(confirmCard, 2, 36)
+	ui.confirmNo = makeButton(confirmRow, "Batal", THEME.SurfaceHi, UDim2.new(0.5, -4, 1, 0))
+	ui.confirmNo.LayoutOrder = 1
+	ui.confirmNo.ZIndex = 22
+	ui.confirmYes = makeButton(confirmRow, "Hapus", Color3.fromRGB(170, 40, 78), UDim2.new(0.5, -4, 1, 0))
+	ui.confirmYes.LayoutOrder = 2
+	ui.confirmYes.ZIndex = 22
+
+	-- Pill (restore handle) -----------------------------------------------------
+	ui.pill = new("TextButton", {
+		Parent = gui,
+		Name = "Pill",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromOffset(60, gui.AbsoluteSize.Y * 0.4),
+		Size = UDim2.fromOffset(92, 34),
+		BackgroundColor3 = Color3.fromRGB(34, 18, 54),
+		BackgroundTransparency = 0.04,
+		Text = "◆ ISEKAI",
+		Font = Enum.Font.GothamBold,
+		TextSize = 12,
+		TextColor3 = THEME.Text,
+		AutoButtonColor = true,
+		Visible = false,
+		ZIndex = 5,
+	}, {
+		corner(17),
+		stroke(THEME.Accent, 1.3, 0.3),
+	})
+
+	-- Toast holder --------------------------------------------------------------
+	ui.toastHolder = new("Frame", {
+		Parent = gui,
+		Name = "Toasts",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 10),
+		Size = UDim2.fromOffset(340, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		ZIndex = 100,
+	}, {
+		new("UIListLayout", {
+			Padding = UDim.new(0, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		}),
+	})
+
+	-- Interaksi -----------------------------------------------------------------
+	local headerDrag = makeDraggable(header, ui.root)
+	local pillDrag = makeDraggable(ui.pill, ui.pill)
+	headerDrag.moved = false
+
+	connect(ui.minimizeBtn.Activated, function()
+		setMinimized(true)
+	end)
+	connect(ui.closeBtn.Activated, function()
+		cleanup()
+	end)
+	connect(ui.pill.Activated, function()
+		if not pillDrag.moved then
+			setMinimized(false)
+		end
+	end)
+
+	connect(ui.saveBtn.Activated, function()
+		savePosition(ui.nameBox.Text)
+	end)
+	connect(ui.nameBox.FocusLost, function(enterPressed)
+		if enterPressed then
+			savePosition(ui.nameBox.Text)
+		end
+	end)
+	connect(ui.returnBtn.Activated, function()
+		if state.busy then
+			cancelMove()
+		else
+			moveToSavedSpot(getSelectedSlot(), "manual")
+		end
+	end)
+	connect(ui.deleteBtn.Activated, function()
+		local slot = getSelectedSlot()
+		if not slot then
+			notify("Pilih slot yang ingin dihapus.", "warning")
+			return
+		end
+		askConfirm(string.format("Hapus posisi \"%s\"?", slot.name), "Hapus", function()
+			deletePosition(slot.id)
+		end)
+	end)
+	connect(ui.deleteAllBtn.Activated, function()
+		if #state.slots == 0 then
+			notify("Tidak ada data untuk dihapus.", "info")
+			return
+		end
+		local here = #visibleSlots()
+		askConfirm(
+			string.format("Hapus SEMUA data tersimpan?\n%d slot di game ini, %d slot di game lain.", here, #state.slots - here),
+			"Hapus Semua",
+			deleteAllPositions
+		)
+	end)
+	connect(ui.confirmNo.Activated, hideConfirm)
+	connect(ui.confirmYes.Activated, function()
+		local callback = ui.confirmCallback
+		hideConfirm()
+		if callback then
+			callback()
+		end
+	end)
+
+	-- Find
+	connect(ui.findBox.FocusLost, function()
+		state.find.custom = sanitizeKeywords(ui.findBox.Text)
+		onScanCriteriaChanged()
+	end)
+	connect(ui.avoidWaterBtn.Activated, function()
+		state.find.avoidWater = not state.find.avoidWater
+		persistSavedData()
+		refreshFindUI()
+		notify("Hindari Air " .. (state.find.avoidWater and "ON: target di air dilewati." or "OFF: karakter boleh berenang ke target."), "info")
+	end)
+	connect(ui.avoidHazardBtn.Activated, function()
+		state.find.avoidHazard = not state.find.avoidHazard
+		esp.nextScan = 0
+		persistSavedData()
+		refreshFindUI()
+		notify("Hindari Bahaya " .. (state.find.avoidHazard and "ON." or "OFF."), state.find.avoidHazard and "success" or "warning")
+	end)
+	connect(ui.findLoopBtn.Activated, function()
+		state.find.loopEnabled = not state.find.loopEnabled
+		persistSavedData()
+		refreshFindUI()
+		if state.find.loopEnabled then
+			notify("Loop Find ON: setelah satu ronde, script akan scan ulang sampai dimatikan atau Stop ditekan.", "success")
+		else
+			notify("Loop Find OFF: Find berhenti mengulang setelah ronde berjalan selesai.", "info")
+		end
+	end)
+	connect(ui.findHighJumpBtn.Activated, function()
+		state.find.jumpHighCoinGold = not state.find.jumpHighCoinGold
+		persistSavedData()
+		refreshFindUI()
+		notify("Lompatan untuk Coin/Gold tinggi " .. (state.find.jumpHighCoinGold and "diaktifkan." or "dimatikan."), "info")
+	end)
+	connect(ui.findModeBtn.Activated, function()
+		state.find.mode = state.find.mode == "walk" and "teleport" or "walk"
+		persistSavedData()
+		refreshFindUI()
+		notify("Mode Find: " .. (state.find.mode == "walk" and "Berjalan" or "Teleport berjarak"), "info")
+	end)
+	connect(ui.espBtn.Activated, function()
+		setEsp(not state.find.espEnabled)
+	end)
+	connect(ui.scanBtn.Activated, function()
+		startFind(true)
+	end)
+	connect(ui.findStartBtn.Activated, function()
+		if state.find.running or state.find.scanning then
+			stopFind()
+		else
+			startFind(false)
+		end
+	end)
+
+	local function saveAutoExecuteUrl()
+		local url = (ui.autoExecuteUrlBox.Text or ""):match("^%s*(.-)%s*$") or ""
+		if (url ~= "" and not isValidHttpUrl(url)) or (state.advanced.autoExecuteEnabled and not isValidHttpUrl(url)) then
+			notify("URL tidak valid. Saat Autoexecute ON, URL raw wajib diawali http:// atau https:// (maks. " .. CONFIG.AutoExecuteUrlMaxLength .. " karakter).", "warning")
+			return
+		end
+		state.advanced.scriptUrl = url
+		setAutoExecuteGlobals(state.advanced.autoExecuteEnabled, url)
+		persistSavedData()
+		if state.advanced.autoExecuteEnabled then
+			local queued, message = queueAutoExecute()
+			notify(message, queued and "success" or "warning")
+		else
+			notify(url == "" and "URL autoexecute dikosongkan." or "URL autoexecute berhasil disimpan.", "success")
+		end
+		refreshUI()
+	end
+	connect(ui.autoExecuteSaveBtn.Activated, saveAutoExecuteUrl)
+	connect(ui.autoExecuteUrlBox.FocusLost, function(enterPressed)
+		if enterPressed then
+			saveAutoExecuteUrl()
+		end
+	end)
+	connect(ui.autoExecuteBtn.Activated, function()
+		if state.advanced.autoExecuteEnabled then
+			state.advanced.autoExecuteEnabled = false
+			setAutoExecuteGlobals(false, state.advanced.scriptUrl)
+			persistSavedData()
+			local queued, message = queueAutoExecute()
+			refreshUI()
+			notify(queued and "Autoexecute dimatikan." or ("Autoexecute dimatikan, tetapi antrean executor tidak bisa dibersihkan: " .. tostring(message)), queued and "info" or "warning")
+			return
+		end
+
+		local url = (ui.autoExecuteUrlBox.Text or ""):match("^%s*(.-)%s*$") or ""
+		if not isValidHttpUrl(url) then
+			notify("Isi URL raw script yang valid lalu tekan Simpan URL.", "warning")
+			return
+		end
+		state.advanced.scriptUrl = url
+		state.advanced.autoExecuteEnabled = true
+		setAutoExecuteGlobals(true, url)
+		persistSavedData()
+		local queued, message = queueAutoExecute()
+		if not queued then
+			state.advanced.autoExecuteEnabled = false
+			setAutoExecuteGlobals(false, url)
+			persistSavedData()
+		end
+		refreshUI()
+		notify(message, queued and "success" or "error")
+	end)
+	connect(ui.antiStuckBtn.Activated, function()
+		state.advanced.antiStuckEnabled = not state.advanced.antiStuckEnabled
+		persistSavedData()
+		refreshUI()
+		notify("Anti-Stuck " .. (state.advanced.antiStuckEnabled and "diaktifkan." or "dimatikan."), state.advanced.antiStuckEnabled and "success" or "info")
+	end)
+
+	connect(ui.naturalBtn.Activated, function()
+		state.advanced.naturalMove = not state.advanced.naturalMove
+		persistSavedData()
+		refreshUI()
+		notify("Gerak Natural " .. (state.advanced.naturalMove and "diaktifkan." or "dimatikan."), state.advanced.naturalMove and "success" or "info")
+	end)
+	connect(ui.autoRejoinBtn.Activated, function()
+		state.rejoin.autoWhenEmpty = not state.rejoin.autoWhenEmpty
+		if not state.rejoin.autoWhenEmpty then state.rejoin.emptyScanStreak = 0 end
+		persistSavedData()
+		refreshUI()
+		notify("Auto Rejoin " .. (state.rejoin.autoWhenEmpty and "ON: target habis, 3 Coin/Gold gagal, atau 5 target umum gagal berturut-turut." or "OFF."), state.rejoin.autoWhenEmpty and "success" or "info")
+	end)
+	connect(ui.footstepBtn.Activated, function()
+		state.advanced.footstepAssist = not state.advanced.footstepAssist
+		persistSavedData()
+		refreshUI()
+		notify("Footstep Sound Assist " .. (state.advanced.footstepAssist and "ON; memakai Sound 'Running' jika tersedia." or "OFF."), "info")
+	end)
+	connect(ui.rejoinTimerBtn.Activated, function()
+		if state.rejoin.manualActive or state.rejoin.manualRepeat then
+			state.rejoin.stopTimer(true)
+		else
+			state.rejoin.startTimer()
+		end
+	end)
+	connect(ui.rejoinNowBtn.Activated, function()
+		requestServerRejoin("Rejoin manual diminta dari UI.")
+	end)
+	connect(ui.rejoinMinutesBox.FocusLost, function(enterPressed)
+		if not enterPressed then return end
+		local minutes, err = state.rejoin.parseMinutes(ui.rejoinMinutesBox.Text)
+		if minutes then
+			state.rejoin.manualMinutes = minutes
+			persistSavedData()
+			ui.refreshRejoin()
+			notify(string.format("Durasi timer rejoin diset ke %d menit.", minutes), "success")
+		else
+			notify(err, "warning")
+		end
+	end)
+	connect(ui.rescanBtn.Activated, function()
+		state.find.rescanEachItem = not state.find.rescanEachItem
+		persistSavedData()
+		refreshFindUI()
+		if state.find.rescanEachItem then
+			notify("Scan ulang tiap item ON: setelah satu item selesai, peta dipindai lagi lalu item terdekat dipilih.", "success")
+		else
+			notify("Scan ulang tiap item OFF: Find memakai daftar awal (item yang hilang tetap dibuang).", "info")
+		end
+	end)
+
+	connect(ui.autoBtn.Activated, toggleAutoReturn)
+	connect(ui.afkBtn.Activated, toggleAntiAFK)
+	connect(ui.keyBtn.Activated, beginKeyCapture)
+	connect(ui.applyDurationBtn.Activated, function()
+		applyDuration(true)
+	end)
+	connect(ui.durationBox.FocusLost, function(enterPressed)
+		-- Enter selalu menerapkan; kehilangan fokus biasa (mis. tap di luar) menerapkan jika isinya berubah.
+		if enterPressed or ui.durationBox.Text ~= tostring(state.afk.minutes) then
+			applyDuration(true)
+		end
+	end)
+	connect(ui.durationBox:GetPropertyChangedSignal("Text"), function()
+		ui.durationStroke.Color = THEME.Border
+	end)
+	connect(gui:GetPropertyChangedSignal("AbsoluteSize"), layoutUI)
+
+	layoutUI()
+end
+
+--------------------------------------------------------------------------------
+-- UI REFRESH
+--------------------------------------------------------------------------------
+
+local function refreshSlotList()
+	for _, child in ipairs(ui.slotList:GetChildren()) do
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+	end
+	local list = visibleSlots()
+	ui.emptyLabel.Visible = #list == 0
+	ui.countLabel.Text = string.format("%d/%d", #list, CONFIG.MaxSlots)
+
+	for index, slot in ipairs(list) do
+		local selected = slot.id == state.selectedId
+		local position = slot.cf.Position
+		local row = new("TextButton", {
+			Parent = ui.slotList,
+			LayoutOrder = index,
+			Size = UDim2.new(1, 0, 0, 40),
+			Text = "",
+			AutoButtonColor = false,
+			BackgroundColor3 = selected and Color3.fromRGB(62, 28, 86) or THEME.Surface,
+			BackgroundTransparency = 0.05,
+		}, {
+			corner(10),
+			stroke(selected and THEME.Accent or THEME.Border, 1, selected and 0.1 or 0.6),
+		})
+		new("TextLabel", {
+			Parent = row,
+			Position = UDim2.fromOffset(10, 0),
+			Size = UDim2.new(0, 16, 1, 0),
+			BackgroundTransparency = 1,
+			Text = selected and "●" or "○",
+			Font = Enum.Font.GothamBold,
+			TextSize = 12,
+			TextColor3 = selected and THEME.Accent or THEME.Muted,
+		})
+		new("TextLabel", {
+			Parent = row,
+			Position = UDim2.fromOffset(30, 4),
+			Size = UDim2.new(1, -40, 0, 16),
+			BackgroundTransparency = 1,
+			Text = slot.name,
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+			TextColor3 = THEME.Text,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+		})
+		new("TextLabel", {
+			Parent = row,
+			Position = UDim2.fromOffset(30, 21),
+			Size = UDim2.new(1, -40, 0, 14),
+			BackgroundTransparency = 1,
+			Text = string.format("X %.1f  Y %.1f  Z %.1f  •  %s", position.X, position.Y, position.Z, os.date("%d/%m %H:%M", slot.savedAt)),
+			Font = Enum.Font.Gotham,
+			TextSize = 11,
+			TextColor3 = THEME.Muted,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+		})
+		row.Activated:Connect(function()
+			selectSlot(slot.id)
+		end)
+	end
+end
+
+refreshStatus = function()
+	if state.closed or not ui.statusLine then
+		return
+	end
+	ui.statusLine.Text = state.statusText
+	ui.statusLine.TextColor3 = KIND_COLOR[state.statusKind] or THEME.Info
+
+	local slot = getSelectedSlot()
+	local afkText = "OFF"
+	if state.afk.active then
+		afkText = "ON (" .. formatTime(state.afk.endsAt - os.clock()) .. ")"
+	end
+	local findText = "OFF"
+	if state.find.running then
+		findText = string.format("%d/%d", state.find.done, state.find.total)
+	elseif state.find.scanning then
+		findText = "memindai"
+	end
+	ui.statusInfo.Text = string.format(
+		"Slot aktif : %s\nAuto Return : %s\nAnti-AFK : %s\nFind : %s%s\nStorage : %s",
+		slot and slot.name or "-",
+		state.autoReturn and "ON" or "OFF",
+		afkText,
+		findText,
+		state.find.espEnabled and " • ESP ON" or "",
+		state.storage.mode
+	)
+end
+
+refreshFindUI = function()
+	if state.closed or not ui.findStartBtn then
+		return
+	end
+	local find = state.find
+	local function tint(button, on)
+		button.BackgroundColor3 = on and THEME.AccentDark or THEME.SurfaceHi
+	end
+
+	for _, category in ipairs(FIND_CATEGORIES) do
+		local chip = ui.findChips[category.id]
+		local on = find.categories[category.id] == true
+		local count = on and find.counts[category.id]
+		chip.Text = (on and "✓ " or "") .. category.label .. (count and count > 0 and (" " .. count) or "")
+		tint(chip, on)
+	end
+
+	for _, kind in ipairs(FIND_KINDS) do
+		local chip = ui.kindChips[kind.id]
+		local on = find.kinds[kind.id] == true
+		local count = find.kindCounts[kind.id]
+		chip.Text = (on and "✓ " or "") .. kind.label .. (find.scanned and (" " .. count) or "")
+		tint(chip, on)
+	end
+	for _, trigger in ipairs(FIND_TRIGGERS) do
+		local chip = ui.triggerChips[trigger.id]
+		local on = find.triggers[trigger.id] == true
+		local count = find.trigCounts[trigger.id]
+		chip.Text = (on and "✓ " or "") .. trigger.label .. (find.scanned and (" " .. count) or "")
+		tint(chip, on)
+	end
+
+	ui.avoidWaterBtn.Text = find.avoidWater and "Hindari Air: ON" or "Hindari Air: OFF"
+	tint(ui.avoidWaterBtn, find.avoidWater)
+	ui.avoidHazardBtn.Text = find.avoidHazard and "Hindari Bahaya: ON" or "Hindari Bahaya: OFF"
+	tint(ui.avoidHazardBtn, find.avoidHazard)
+
+	ui.findLoopBtn.Text = find.loopEnabled and "Loop Find: ON" or "Loop Find: OFF"
+	tint(ui.findLoopBtn, find.loopEnabled)
+	ui.espBtn.Text = find.espEnabled and "ESP: ON" or "ESP: OFF"
+	tint(ui.espBtn, find.espEnabled)
+	ui.findHighJumpBtn.Text = find.jumpHighCoinGold and "Jump Coin/Gold: ON" or "Jump Coin/Gold: OFF"
+	tint(ui.findHighJumpBtn, find.jumpHighCoinGold)
+	ui.rescanBtn.Text = find.rescanEachItem and "Scan Ulang Tiap Item: ON" or "Scan Ulang Tiap Item: OFF"
+	tint(ui.rescanBtn, find.rescanEachItem)
+	ui.findModeBtn.Text = find.mode == "teleport" and "Mode: TELEPORT" or "Mode: BERJALAN"
+	tint(ui.findModeBtn, find.mode == "teleport")
+
+	for _, category in ipairs(FIND_CATEGORIES) do
+		local enabled = find.interactEnabled[category.id] == true
+		local interactBtn = ui.findInteractBtns[category.id]
+		local keyBtn = ui.findKeyBtns[category.id]
+		interactBtn.Text = category.label .. " Auto: " .. (enabled and "ON" or "OFF")
+		tint(interactBtn, enabled)
+		if state.capturingFindKey == category.id then
+			keyBtn.Text = "Tekan tombol..."
+			keyBtn.BackgroundColor3 = THEME.Accent
+		else
+			local keyCode = find.interactKeys[category.id]
+			keyBtn.Text = "Key: " .. (keyCode and keyCode.Name or "E")
+			keyBtn.BackgroundColor3 = THEME.SurfaceHi
+		end
+	end
+
+	local active = find.running or find.scanning
+	ui.findStartBtn.Text = active and "Stop Find" or "Start Find"
+	ui.findStartBtn.BackgroundColor3 = active and Color3.fromRGB(190, 110, 30) or THEME.AccentDark
+	ui.scanBtn.Text = find.scanning and "Memindai..." or "Scan"
+
+	if find.running then
+		ui.findCount.Text = string.format("%d/%d", find.done, find.total)
+	elseif #find.results > 0 then
+		ui.findCount.Text = string.format("%d item", #find.results)
+	else
+		ui.findCount.Text = ""
+	end
+	ui.findResult.Text = find.statusText
+	ui.findSpeedSlider.set(find.speedPct)
+	ui.findStandoffSlider.set(find.standoff)
+	refreshStatus()
+end
+
+ui.refreshRejoin = function()
+	if not ui.rejoinTimerBtn then return end
+	if ui.rejoinMinutesBox and not ui.rejoinMinutesBox:IsFocused() then
+		ui.rejoinMinutesBox.Text = tostring(state.rejoin.manualMinutes)
+	end
+	if state.rejoin.manualActive then
+		local remaining = math.max(0, state.rejoin.manualEndsAt - os.clock())
+		ui.rejoinTimerBtn.Text = "Stop Timer"
+		ui.rejoinTimerBtn.BackgroundColor3 = Color3.fromRGB(190, 110, 30)
+		ui.rejoinCountdown.Text = "Rejoin dalam: " .. formatTime(remaining) .. " (berulang)"
+	elseif state.rejoin.manualRepeat then
+		ui.rejoinTimerBtn.Text = "Stop Timer"
+		ui.rejoinTimerBtn.BackgroundColor3 = Color3.fromRGB(190, 110, 30)
+		ui.rejoinCountdown.Text = "Timer rejoin: menunggu dihitung ulang..."
+	else
+		ui.rejoinTimerBtn.Text = "Mulai Timer"
+		ui.rejoinTimerBtn.BackgroundColor3 = THEME.SurfaceHi
+		ui.rejoinCountdown.Text = "Timer rejoin: OFF"
+	end
+end
+
+refreshUI = function()
+	if state.closed or not ui.gui then
+		return
+	end
+	refreshSlotList()
+	refreshStatus()
+
+	ui.autoBtn.Text = state.autoReturn and "Auto Return: ON" or "Auto Return: OFF"
+	ui.autoBtn.BackgroundColor3 = state.autoReturn and THEME.AccentDark or THEME.SurfaceHi
+
+	ui.afkBtn.Text = state.afk.active and "Anti-AFK: ON" or "Anti-AFK: OFF"
+	ui.afkBtn.BackgroundColor3 = state.afk.active and THEME.AccentDark or THEME.SurfaceHi
+
+	if ui.autoExecuteBtn then
+		ui.autoExecuteBtn.Text = state.advanced.autoExecuteEnabled and "Autoexecute: ON" or "Autoexecute: OFF"
+		ui.autoExecuteBtn.BackgroundColor3 = state.advanced.autoExecuteEnabled and THEME.AccentDark or THEME.SurfaceHi
+	end
+	if ui.naturalBtn then
+		ui.naturalBtn.Text = state.advanced.naturalMove and "Gerak Natural: ON" or "Gerak Natural: OFF"
+		ui.naturalBtn.BackgroundColor3 = state.advanced.naturalMove and THEME.AccentDark or THEME.SurfaceHi
+	end
+	if ui.antiStuckBtn then
+		ui.antiStuckBtn.Text = state.advanced.antiStuckEnabled and "Anti-Stuck: ON" or "Anti-Stuck: OFF"
+		ui.antiStuckBtn.BackgroundColor3 = state.advanced.antiStuckEnabled and THEME.AccentDark or THEME.SurfaceHi
+	end
+	if ui.autoRejoinBtn then
+		ui.autoRejoinBtn.Text = state.rejoin.autoWhenEmpty and "Auto Rejoin: ON" or "Auto Rejoin: OFF"
+		ui.autoRejoinBtn.BackgroundColor3 = state.rejoin.autoWhenEmpty and THEME.AccentDark or THEME.SurfaceHi
+	end
+	if ui.footstepBtn then
+		ui.footstepBtn.Text = state.advanced.footstepAssist and "Footstep Sound Assist: ON" or "Footstep Sound Assist: OFF"
+		ui.footstepBtn.BackgroundColor3 = state.advanced.footstepAssist and THEME.AccentDark or THEME.SurfaceHi
+	end
+	if ui.refreshRejoin then ui.refreshRejoin() end
+	if ui.autoExecuteUrlBox and not ui.autoExecuteUrlBox:IsFocused() then
+		ui.autoExecuteUrlBox.Text = state.advanced.scriptUrl
+	end
+
+	if state.capturingKey then
+		ui.keyBtn.Text = "Tekan tombol..."
+		ui.keyBtn.BackgroundColor3 = THEME.Accent
+	else
+		ui.keyBtn.Text = "Tombol: " .. state.afk.keyCode.Name
+		ui.keyBtn.BackgroundColor3 = THEME.SurfaceHi
+	end
+
+	if not state.afk.active then
+		ui.afkCountdown.Text = "Tekan berikutnya: --:--"
+	end
+
+	ui.returnBtn.Text = state.busy and "Stop" or "Return"
+	ui.returnBtn.BackgroundColor3 = state.busy and Color3.fromRGB(190, 110, 30) or THEME.AccentDark
+	ui.speedSlider.set(state.walkSpeedPct)
+	ui.delaySlider.set(state.autoDelay)
+	ui.triggerSlider.set(state.autoTrigger)
+	refreshFindUI()
+	if ui.refreshPrefs then
+		ui.refreshPrefs()
+	end
+	if ui.refreshServer then
+		ui.refreshServer()
+	end
+	if ui.refreshTools then
+		ui.refreshTools()
+	end
+	if ui.refreshNpc then
+		ui.refreshNpc()
+	end
+end
+
+--------------------------------------------------------------------------------
+-- INTRO (4 detik)
+--------------------------------------------------------------------------------
+
+local function showMainPanel()
+	state.uiReady = true
+	ui.root.Visible = true
+	ui.rootScale.Scale = 0.94
+	ui.panel.GroupTransparency = 1
+	tween(ui.panel, 0.35, { GroupTransparency = 0 })
+	tween(ui.rootScale, 0.35, { Scale = 1 }, Enum.EasingStyle.Back)
+
+	for _, notice in ipairs(pendingNotices) do
+		if ui.addLog then ui.addLog(notice[1], notice[2], "Startup") end
+		showNotification(notice[1], notice[2])
+	end
+	table.clear(pendingNotices)
+	refreshUI()
+end
+
+local function playIntro()
+	local overlay = new("Frame", {
+		Parent = ui.gui,
+		Name = "Intro",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.fromRGB(5, 3, 10),
+		BackgroundTransparency = 1,
+		ZIndex = 50,
+	})
+	local scale = new("UIScale", { Scale = 0.8 })
+	local card = new("CanvasGroup", {
+		Parent = overlay,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(0, 360, 0, 200),
+		BackgroundColor3 = THEME.Background,
+		BackgroundTransparency = 1,
+		GroupTransparency = 1,
+	}, {
+		corner(22),
+		stroke(THEME.Accent, 1.5, 0.35),
+		scale,
+	})
+	new("Frame", {
+		Parent = card,
+		Name = "Glass",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundTransparency = 0.02,
+		ZIndex = 0,
+	}, {
+		new("UIGradient", { Rotation = 135, Color = ColorSequence.new(THEME.BackgroundAlt, THEME.Background) }),
+	})
+	local title = new("TextLabel", {
+		Parent = card,
+		Position = UDim2.fromOffset(12, 20),
+		Size = UDim2.new(1, -24, 0, 48),
+		BackgroundTransparency = 1,
+		Text = CONFIG.IntroTitle,
+		Font = Enum.Font.GothamBlack,
+		TextSize = 38,
+		TextColor3 = THEME.Text,
+		TextScaled = true,
+	}, { new("UITextSizeConstraint", { MaxTextSize = 38, MinTextSize = 14 }) })
+	new("TextLabel", {
+		Parent = card,
+		Position = UDim2.fromOffset(12, 70),
+		Size = UDim2.new(1, -24, 0, 14),
+		BackgroundTransparency = 1,
+		Text = CONFIG.Credit,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 11,
+		TextColor3 = THEME.Text,
+		TextTransparency = 0.5,
+	})
+	new("TextLabel", {
+		Parent = card,
+		Position = UDim2.fromOffset(12, 94),
+		Size = UDim2.new(1, -24, 0, 18),
+		BackgroundTransparency = 1,
+		Text = CONFIG.Subtitle,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 12,
+		TextColor3 = THEME.Muted,
+	})
+	local track = new("Frame", {
+		Parent = card,
+		Position = UDim2.new(0, 28, 0, 138),
+		Size = UDim2.new(1, -56, 0, 6),
+		BackgroundColor3 = Color3.fromRGB(40, 28, 62),
+	}, { corner(3) })
+	local fill = new("Frame", {
+		Parent = track,
+		Size = UDim2.fromScale(0, 1),
+		BackgroundColor3 = THEME.AccentDark,
+	}, { corner(3) })
+	local stage = new("TextLabel", {
+		Parent = card,
+		Position = UDim2.fromOffset(12, 156),
+		Size = UDim2.new(1, -24, 0, 18),
+		BackgroundTransparency = 1,
+		Text = "Menyiapkan sistem...",
+		Font = Enum.Font.Gotham,
+		TextSize = 11,
+		TextColor3 = THEME.Muted,
+	})
+
+	local holdTime = CONFIG.IntroDuration - CONFIG.IntroFadeOut
+	tween(overlay, 0.4, { BackgroundTransparency = 0.35 })
+	tween(card, 0.6, { GroupTransparency = 0 })
+	tween(scale, 0.7, { Scale = 1 }, Enum.EasingStyle.Back)
+	tween(fill, holdTime - 0.2, { Size = UDim2.fromScale(1, 1), BackgroundColor3 = THEME.Accent }, Enum.EasingStyle.Linear)
+	tween(title, holdTime - 0.4, { TextColor3 = Color3.fromRGB(240, 150, 236) }, Enum.EasingStyle.Sine)
+
+	spawnTask(function()
+		task.wait(holdTime * 0.35)
+		if state.closed then return end
+		stage.Text = "Memuat data posisi..."
+		task.wait(holdTime * 0.35)
+		if state.closed then return end
+		stage.Text = "Menyiapkan antarmuka..."
+		task.wait(holdTime * 0.3)
+		if state.closed then return end
+		stage.Text = "Siap."
+		tween(card, CONFIG.IntroFadeOut, { GroupTransparency = 1 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		tween(scale, CONFIG.IntroFadeOut, { Scale = 1.06 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		tween(overlay, CONFIG.IntroFadeOut, { BackgroundTransparency = 1 })
+		task.wait(CONFIG.IntroFadeOut)
+		if state.closed then return end
+		overlay:Destroy()
+		showMainPanel()
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- FOOTSTEP SOUND ASSIST
+--------------------------------------------------------------------------------
+
+state.advanced.startFootstepAssist = function(character)
+	if state.closed or not character then return end
+	spawnTask(function()
+		local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 5)
+		local root = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 5)
+		if not humanoid or not root or state.closed then return end
+		local sound = root:FindFirstChild("Running")
+		if not sound then sound = root:WaitForChild("Running", 4) end
+		if not sound or not sound:IsA("Sound") then
+			if state.advanced.footstepAssist and ui.addLog then
+				ui.addLog("Audio assist tidak menemukan Sound 'Running' pada HumanoidRootPart; game mungkin memakai sistem langkah custom.", "warning", "Audio")
+			end
+			return
+		end
+		local startedByAssist = false
+		local connection = humanoid.Running:Connect(function(speed)
+			if state.closed then return end
+			if not state.advanced.footstepAssist then
+				if startedByAssist and sound.Parent then pcall(function() sound:Stop() end) end
+				startedByAssist = false
+				return
+			end
+			local grounded = humanoid.FloorMaterial ~= Enum.Material.Air and humanoid.SeatPart == nil
+			if speed > 1 and grounded then
+				if sound.Parent and sound.SoundId ~= "" and sound.Volume > 0 and not sound.IsPlaying then
+					local ok = pcall(function() sound:Play() end)
+					startedByAssist = ok
+				end
+			elseif (speed <= 0.5 or not grounded) and startedByAssist then
+				if sound.Parent then pcall(function() sound:Stop() end) end
+				startedByAssist = false
+			end
+		end)
+		table.insert(connections, connection)
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- GLOBAL ANTI-STUCK MONITOR
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+-- ANTI-SIT v12.3 (kursi / remote / paksa-duduk tidak membuat karakter duduk; tanpa meloncat)
+--------------------------------------------------------------------------------
+-- Lapis 1 (cegah): semua Seat/VehicleSeat (dan ProximityPrompt "Sit/Duduk") dimatikan SECARA LOKAL
+--   (Disabled = true). Nilai asli dicatat dan dipulihkan saat Anti-Sit dimatikan / script ditutup.
+-- Lapis 2 (blokir remote): RemoteEvent / UnreliableRemoteEvent / RemoteFunction yang namanya mengandung kata
+--   sit / seat / duduk / kursi / chair / bangku (+ kata tambahan dari kotak teks Advanced) dimatikan di client:
+--   semua koneksi OnClientEvent-nya di-Disable lewat getconnections, OnClientInvoke diganti callback kosong
+--   (butuh getcallbackvalue agar bisa dipulihkan). Dicek ulang tiap 1 dtk karena game bisa memasang listener belakangan.
+-- Lapis 3 (reaksi instan): perubahan Humanoid.SeatPart / Sit / event Seated dan SeatWeld baru yang menempel ke
+--   karakter ditangani SAAT ITU JUGA (Sit = false + semua SeatWeld dilepas di frame yang sama), tidak menunggu polling.
+--   State Seated pada Humanoid juga dimatikan (SetStateEnabled) dan dipulihkan saat Anti-Sit dimatikan.
+-- Lapis 4 (cadangan): loop pemantau Anti-Stuck tetap memeriksa tiap AntiStuckPollInterval.
+-- Batas: bila SERVER sendiri yang menyambung SeatWeld lalu terus mengulanginya (mis. bug grobak), client hanya bisa
+-- melepasnya kembali secepat mungkin; server tetap bisa mendudukkan lagi.
+local antiSit = {
+	seats = setmetatable({}, { __mode = "k" }), -- kunci lemah: kursi yang dihapus game tidak tertahan di memori
+	prompts = setmetatable({}, { __mode = "k" }),
+	remotes = setmetatable({}, { __mode = "k" }), -- remote -> { callback = OnClientInvoke asli (RemoteFunction) }
+	blockedConns = {}, -- koneksi OnClientEvent yang kita Disable (untuk di-Enable lagi saat dimatikan)
+	blockedNames = {},
+	remoteCount = 0,
+	count = 0,
+	added = nil,
+	addedRS = nil,
+	charAdded = nil,
+	humConns = {},
+	humanoid = nil,
+	seatedWas = nil,
+	standing = false,
+	scanDone = false,
+	loopGen = 0,
+	sig = nil,
+	warnedNoGetConn = false,
+	extraRaw = nil,
+	extraList = {},
+	words = { "sit", "sitting", "seat", "seated", "duduk", "kursi", "chair", "bangku" },
+	stub = function()
+		return nil
+	end,
+}
+
+local function isSitPrompt(inst)
+	if not inst:IsA("ProximityPrompt") then
+		return false
+	end
+	local tokens = tokenize(tostring(inst.ActionText) .. " " .. tostring(inst.ObjectText) .. " " .. inst.Name)
+	return tokenHas(tokens, "sit", false) or tokenHas(tokens, "duduk", false)
+end
+
+local function isSeatLike(inst)
+	return inst:IsA("Seat") or inst:IsA("VehicleSeat") or inst:IsA("ProximityPrompt")
+end
+
+function antiSit.isRemote(inst)
+	return inst:IsA("RemoteEvent") or inst:IsA("UnreliableRemoteEvent") or inst:IsA("RemoteFunction")
+end
+
+-- Kata tambahan dari kotak teks Advanced (pisah koma / spasi), maksimal 12 kata, cocok sebagai potongan nama.
+function antiSit.extraWords()
+	local raw = tostring(state.prefs.antiSitWords or "")
+	if antiSit.extraRaw ~= raw then
+		antiSit.extraRaw = raw
+		antiSit.extraList = {}
+		for word in raw:lower():gmatch("[^,;%s]+") do
+			if #antiSit.extraList < 12 then
+				table.insert(antiSit.extraList, word)
+			end
+		end
+	end
+	return antiSit.extraList
+end
+
+function antiSit.nameMatches(name)
+	local tokens = tokenize(name)
+	for _, word in ipairs(antiSit.words) do
+		if tokenHas(tokens, word, false) then
+			return true
+		end
+	end
+	local lowered = name:lower()
+	for _, word in ipairs(antiSit.extraWords()) do
+		if lowered:find(word, 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
+function antiSit.signature()
+	return tostring(state.prefs.antiSitRemotes) .. "|" .. tostring(state.prefs.antiSitWords)
+end
+
+function antiSit.noteBlocked(remote)
+	antiSit.remoteCount += 1
+	if #antiSit.blockedNames < 10 then
+		table.insert(antiSit.blockedNames, remote.Name)
+	end
+	if antiSit.scanDone and ui.addLog then
+		ui.addLog("Anti-Sit: remote '" .. remote.Name .. "' dimatikan di client.", "info", "AntiSit")
+	end
+end
+
+-- Disable semua koneksi OnClientEvent yang masih aktif pada remote ini.
+function antiSit.disableConns(remote)
+	local ok, list = pcall(globalEnv.getconnections, remote.OnClientEvent)
+	if not ok or type(list) ~= "table" then
+		return
+	end
+	for _, conn in ipairs(list) do
+		local readOk, enabled = pcall(function()
+			return conn.Enabled
+		end)
+		if not readOk or enabled ~= false then
+			local disabledOk = pcall(function()
+				conn:Disable()
+			end)
+			if disabledOk and #antiSit.blockedConns < 400 then
+				table.insert(antiSit.blockedConns, conn)
+			end
+		end
+	end
+end
+
+function antiSit.blockRemote(remote)
+	if remote:IsA("RemoteFunction") then
+		if antiSit.remotes[remote] ~= nil or type(globalEnv.getcallbackvalue) ~= "function" then
+			return
+		end
+		local ok, original = pcall(globalEnv.getcallbackvalue, remote, "OnClientInvoke")
+		if not ok then
+			return
+		end
+		antiSit.remotes[remote] = { callback = original }
+		pcall(function()
+			remote.OnClientInvoke = antiSit.stub
+		end)
+		antiSit.noteBlocked(remote)
+		return
+	end
+	if type(globalEnv.getconnections) ~= "function" then
+		if not antiSit.warnedNoGetConn then
+			antiSit.warnedNoGetConn = true
+			if ui.addLog then
+				ui.addLog("Anti-Sit: executor tidak punya getconnections, blokir remote Sit dilewati (lapis reaksi tetap aktif).", "warning", "AntiSit")
+			end
+		end
+		return
+	end
+	if antiSit.remotes[remote] == nil then
+		antiSit.remotes[remote] = {}
+		antiSit.noteBlocked(remote)
+	end
+	antiSit.disableConns(remote)
+end
+
+-- Dipanggil tiap 1 dtk: listener baru yang dipasang game pada remote Sit ikut dimatikan.
+function antiSit.sweepRemotes()
+	for remote, info in pairs(antiSit.remotes) do
+		if not remote.Parent then
+			antiSit.remotes[remote] = nil
+		elseif remote:IsA("RemoteFunction") then
+			if type(globalEnv.getcallbackvalue) == "function" then
+				local ok, current = pcall(globalEnv.getcallbackvalue, remote, "OnClientInvoke")
+				if ok and current ~= antiSit.stub then
+					info.callback = current
+					pcall(function()
+						remote.OnClientInvoke = antiSit.stub
+					end)
+				end
+			end
+		else
+			antiSit.disableConns(remote)
+		end
+	end
+end
+
+function antiSit.releaseRemotes()
+	for _, conn in ipairs(antiSit.blockedConns) do
+		pcall(function()
+			conn:Enable()
+		end)
+	end
+	table.clear(antiSit.blockedConns)
+	for remote, info in pairs(antiSit.remotes) do
+		if remote.Parent and remote:IsA("RemoteFunction") then
+			pcall(function()
+				remote.OnClientInvoke = info.callback
+			end)
+		end
+	end
+	table.clear(antiSit.remotes)
+	table.clear(antiSit.blockedNames)
+	antiSit.remoteCount = 0
+end
+
+function antiSit.consider(inst)
+	if inst:IsA("Seat") or inst:IsA("VehicleSeat") then
+		if antiSit.seats[inst] == nil then
+			local _, humanoid = getCharacterParts()
+			if humanoid and humanoid.SeatPart == inst then
+				return
+			end
+			antiSit.seats[inst] = inst.Disabled
+			inst.Disabled = true
+			antiSit.count += 1
+		end
+	elseif isSitPrompt(inst) then
+		if antiSit.prompts[inst] == nil then
+			antiSit.prompts[inst] = inst.Enabled
+			inst.Enabled = false
+			antiSit.count += 1
+		end
+	elseif antiSit.isRemote(inst) then
+		if state.prefs.antiSitRemotes and antiSit.nameMatches(inst.Name) then
+			antiSit.blockRemote(inst)
+		end
+	end
+end
+
+-- remotesOnly = true: hanya mencari remote (dipakai saat toggle / kata tambahan berubah).
+function antiSit.scan(remotesOnly)
+	local roots = { Workspace, game:GetService("ReplicatedStorage"), game:GetService("ReplicatedFirst") }
+	local index = 0
+	for rootIndex, root in ipairs(roots) do
+		for _, inst in ipairs(root:GetDescendants()) do
+			index += 1
+			if index % 2000 == 0 then
+				task.wait()
+				if state.closed or not state.prefs.antiSit or not antiSit.added then
+					return
+				end
+			end
+			if antiSit.isRemote(inst) or (rootIndex == 1 and not remotesOnly and isSeatLike(inst)) then
+				antiSit.consider(inst)
+			end
+		end
+	end
+	antiSit.scanDone = true
+	if ui.addLog then
+		local text = string.format("Anti-Sit: %d kursi/prompt duduk dinonaktifkan secara lokal.", antiSit.count)
+		if state.prefs.antiSitRemotes then
+			local names = #antiSit.blockedNames > 0 and (" (" .. table.concat(antiSit.blockedNames, ", ") .. ")") or ""
+			text ..= string.format(" Remote Sit dimatikan: %d%s.", antiSit.remoteCount, names)
+		end
+		ui.addLog(text, "info", "AntiSit")
+	end
+end
+
+-- Lepas SEKETIKA: Sit = false dan semua weld ke kursi (SeatWeld / weld apa pun yang menyambung ke Seat) dihapus lokal.
+function antiSit.release(humanoid)
+	local seat = humanoid.SeatPart
+	pcall(function()
+		humanoid.Sit = false
+	end)
+	local root = humanoid.RootPart
+	if root and root.Parent then
+		local ok, joints = pcall(root.GetJoints, root)
+		if ok and type(joints) == "table" then
+			for _, joint in ipairs(joints) do
+				pcall(function()
+					local other = joint.Part0 == root and joint.Part1 or joint.Part0
+					local toSeat = other and (other:IsA("Seat") or other:IsA("VehicleSeat"))
+					if joint.Name == "SeatWeld" or (toSeat and not joint:IsA("Motor6D")) then
+						joint:Destroy()
+					end
+				end)
+			end
+		end
+	end
+	if seat and seat.Parent then
+		local weld = seat:FindFirstChild("SeatWeld")
+		if weld then
+			pcall(weld.Destroy, weld)
+		end
+	end
+end
+
+-- Berdiri tanpa loncat. Aman dipanggil berulang (hanya satu proses berjalan). Tiga percobaan pertama per-frame.
+function antiSit.stand(humanoid)
+	if antiSit.standing then
+		return
+	end
+	antiSit.standing = true
+	local seat = humanoid.SeatPart
+	for attempt = 1, 8 do
+		if state.closed or not humanoid.Parent or humanoid.Health <= 0 or not isSeated(humanoid) then
+			break
+		end
+		antiSit.release(humanoid)
+		if attempt >= 3 then
+			local root = humanoid.RootPart
+			if root and root.Parent then
+				root.CFrame = root.CFrame + Vector3.new(0, 2.5, 0) -- bergeser ke atas, BUKAN loncat
+				root.AssemblyLinearVelocity = Vector3.zero
+			end
+		end
+		if attempt <= 3 then
+			RunService.Heartbeat:Wait()
+		else
+			task.wait(0.15)
+		end
+	end
+	if seat and seat.Parent and state.prefs.antiSit and (seat:IsA("Seat") or seat:IsA("VehicleSeat")) then
+		antiSit.consider(seat)
+	end
+	antiSit.standing = false
+end
+
+-- Reaksi instan dari event (tanpa menunggu polling). Aman dipanggil berulang.
+function antiSit.react(humanoid)
+	if state.closed or not state.prefs.antiSit or not serverAllowed() then
+		return
+	end
+	if not humanoid.Parent or humanoid.Health <= 0 or not isSeated(humanoid) then
+		return
+	end
+	antiSit.release(humanoid)
+	if isSeated(humanoid) and not antiSit.standing then
+		spawnTask(antiSit.stand, humanoid)
+	end
+end
+
+-- SeatWeld baru yang menempel ke karakter kita langsung dihapus.
+function antiSit.onWeld(weld)
+	task.defer(function()
+		if state.closed or not state.prefs.antiSit or not weld.Parent then
+			return
+		end
+		local character, humanoid = getCharacterParts()
+		if not character then
+			return
+		end
+		local part0, part1 = weld.Part0, weld.Part1
+		if (part1 and part1:IsDescendantOf(character)) or (part0 and part0:IsDescendantOf(character)) then
+			pcall(weld.Destroy, weld)
+			if humanoid then
+				antiSit.react(humanoid)
+			end
+		end
+	end)
+end
+
+function antiSit.unwatch()
+	for _, conn in ipairs(antiSit.humConns) do
+		pcall(function()
+			conn:Disconnect()
+		end)
+	end
+	table.clear(antiSit.humConns)
+	local humanoid = antiSit.humanoid
+	if humanoid and humanoid.Parent and antiSit.seatedWas ~= nil then
+		pcall(function()
+			humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, antiSit.seatedWas)
+		end)
+	end
+	antiSit.humanoid = nil
+	antiSit.seatedWas = nil
+end
+
+function antiSit.watch(humanoid)
+	if antiSit.humanoid == humanoid then
+		return
+	end
+	antiSit.unwatch()
+	antiSit.humanoid = humanoid
+	local ok, was = pcall(function()
+		return humanoid:GetStateEnabled(Enum.HumanoidStateType.Seated)
+	end)
+	if ok then
+		antiSit.seatedWas = was
+	else
+		antiSit.seatedWas = true
+	end
+	pcall(function()
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+	end)
+	local function onChange()
+		antiSit.react(humanoid)
+	end
+	table.insert(antiSit.humConns, connect(humanoid:GetPropertyChangedSignal("SeatPart"), onChange))
+	table.insert(antiSit.humConns, connect(humanoid:GetPropertyChangedSignal("Sit"), onChange))
+	table.insert(antiSit.humConns, connect(humanoid.Seated, onChange))
+	onChange() -- bila sudah terduduk saat Anti-Sit dinyalakan
+end
+
+function antiSit.watchCharacter(character)
+	spawnTask(function()
+		local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 8)
+		if humanoid and antiSit.added and state.prefs.antiSit and player.Character == character then
+			antiSit.watch(humanoid)
+		end
+	end)
+end
+
+function antiSit.startLoop()
+	antiSit.loopGen += 1
+	local generation = antiSit.loopGen
+	spawnTask(function()
+		while not state.closed and antiSit.loopGen == generation and antiSit.added do
+			task.wait(1)
+			if state.closed or antiSit.loopGen ~= generation or not antiSit.added then
+				return
+			end
+			if state.prefs.antiSitRemotes and next(antiSit.remotes) ~= nil then
+				antiSit.sweepRemotes()
+			end
+		end
+	end)
+end
+
+function antiSit.enable()
+	if antiSit.added then
+		return
+	end
+	antiSit.sig = antiSit.signature()
+	antiSit.scanDone = false
+	antiSit.added = connect(Workspace.DescendantAdded, function(inst)
+		if not state.prefs.antiSit then
+			return
+		end
+		if inst.Name == "SeatWeld" and inst:IsA("JointInstance") then
+			antiSit.onWeld(inst)
+		end
+		if isSeatLike(inst) or antiSit.isRemote(inst) then
+			antiSit.consider(inst)
+		end
+	end)
+	antiSit.addedRS = connect(game:GetService("ReplicatedStorage").DescendantAdded, function(inst)
+		if state.prefs.antiSit and antiSit.isRemote(inst) then
+			antiSit.consider(inst)
+		end
+	end)
+	antiSit.charAdded = connect(player.CharacterAdded, antiSit.watchCharacter)
+	if player.Character then
+		antiSit.watchCharacter(player.Character)
+	end
+	antiSit.startLoop()
+	spawnTask(antiSit.scan, false)
+end
+
+function antiSit.disable()
+	antiSit.loopGen += 1
+	for _, key in ipairs({ "added", "addedRS", "charAdded" }) do
+		local conn = antiSit[key]
+		if conn then
+			conn:Disconnect()
+			antiSit[key] = nil
+		end
+	end
+	antiSit.unwatch()
+	antiSit.releaseRemotes()
+	for seat, original in pairs(antiSit.seats) do
+		if seat.Parent then
+			pcall(function()
+				seat.Disabled = original
+			end)
+		end
+	end
+	for prompt, original in pairs(antiSit.prompts) do
+		if prompt.Parent then
+			pcall(function()
+				prompt.Enabled = original
+			end)
+		end
+	end
+	table.clear(antiSit.seats)
+	table.clear(antiSit.prompts)
+	antiSit.count = 0
+	antiSit.sig = nil
+	antiSit.scanDone = false
+end
+
+table.insert(cleanupHooks, antiSit.disable)
+
+-- Anti-Sit hanya aktif bila dinyalakan DAN tipe server cocok dengan Mode server.
+-- Bila toggle "Blokir remote" / kata tambahan berubah saat sudah aktif, daftar remote dibangun ulang.
+function antiSit.apply()
+	if state.closed then
+		return
+	end
+	if state.prefs.antiSit and serverAllowed() then
+		antiSit.enable()
+		local signature = antiSit.signature()
+		if antiSit.sig ~= signature then
+			antiSit.sig = signature
+			antiSit.releaseRemotes()
+			antiSit.scanDone = false
+			if state.prefs.antiSitRemotes then
+				spawnTask(antiSit.scan, true)
+			end
+		end
+	else
+		antiSit.disable()
+	end
+end
+
+local antiStuckGeneration = 0
+local function startAntiStuckMonitor(character)
+	antiStuckGeneration += 1
+	local generation = antiStuckGeneration
+	spawnTask(function()
+		if not character or not character.Parent then
+			return
+		end
+		local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 8)
+		local root = character:FindFirstChild("HumanoidRootPart") or (humanoid and humanoid.RootPart)
+		if not humanoid or not root then
+			return
+		end
+
+		local lastPosition = root.Position
+		local lastMotionAt = os.clock()
+		local lastRecoveryAt = 0
+		local lastEscapeAt = -math.huge
+		local embedSince, embedAnchor = nil, nil
+		while not state.closed and generation == antiStuckGeneration and player.Character == character do
+			local wantStuck = state.advanced.antiStuckEnabled and serverAllowed()
+			local wantSit = state.prefs.antiSit and serverAllowed()
+			if (wantStuck or wantSit) and humanoid.Parent and humanoid.Health > 0 and root.Parent then
+				local now = os.clock()
+				local position = root.Position
+				local humanoidState = humanoid:GetState()
+
+				if isSeated(humanoid) then
+					lastMotionAt = now -- duduk bukan "tersangkut"
+					embedSince = nil
+					if wantSit and now - lastRecoveryAt >= 0.75 and not antiSit.standing then
+						lastRecoveryAt = now
+						spawnTask(antiSit.stand, humanoid)
+					end
+				elseif wantStuck then
+					if (position - lastPosition).Magnitude >= 0.75 then
+						lastPosition = position
+						lastMotionAt = now
+					end
+
+					if now - lastRecoveryAt >= 0.75 then
+						if humanoid.PlatformStand or humanoidState == Enum.HumanoidStateType.PlatformStanding then
+							lastRecoveryAt = now
+							pcall(function()
+								humanoid.PlatformStand = false
+								humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+							end)
+						elseif humanoidState == Enum.HumanoidStateType.FallingDown or humanoidState == Enum.HumanoidStateType.Ragdoll then
+							lastRecoveryAt = now
+							pcall(function()
+								humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+							end)
+						end
+					end
+
+					-- Tertanam di batu / dinding / tanah: harus terbaca tertanam TERUS-MENERUS selama EmbedConfirmSeconds dan
+					-- hampir tidak bergeser, baru teleport ke titik bebas terdekat. Lewat dekat / berdiri di atas batu tidak memicu.
+					if now - lastEscapeAt >= 2.5 and humanoidState ~= Enum.HumanoidStateType.Climbing then
+						if isEmbedded(character, root, humanoid) then
+							if not embedSince or (position - embedAnchor).Magnitude > 2.5 then
+								embedSince = now
+								embedAnchor = position
+							elseif now - embedSince >= CONFIG.EmbedConfirmSeconds then
+								embedSince = nil
+								lastEscapeAt = now
+								escapeEmbedded(character, humanoid, root, 0.35)
+							end
+						else
+							embedSince = nil
+						end
+					end
+
+					-- Recovery ringan saat pemain memberi input, tetapi posisi benar-benar tidak berubah.
+					if not state.busy and humanoid.MoveDirection.Magnitude > 0.1 and now - lastMotionAt >= CONFIG.AntiStuckMoveTimeout and now - lastRecoveryAt >= 2 then
+						lastRecoveryAt = now
+						lastMotionAt = now
+						pcall(function()
+							root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, math.max(root.AssemblyLinearVelocity.Y, 0), root.AssemblyLinearVelocity.Z)
+							humanoid.Jump = true
+							humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+						end)
+					end
+				end
+			end
+			task.wait(CONFIG.AntiStuckPollInterval)
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- SERVER: MODE SERVER, AUTO RECONNECT, HOP / SERVER BROWSER, PING, STALL, BATAS SESI
+--------------------------------------------------------------------------------
+local serverMod = state.server
+serverMod.ping = nil
+serverMod.pingStrikes = 0
+serverMod.lastPingAction = -math.huge
+serverMod.limitActive = 0 -- detik Find aktif sejak batas sesi terakhir
+serverMod.limitBase = 0
+serverMod.lastAllowed = nil
+serverMod.net = { active = false, attempts = 0 }
+serverMod.listBusy = false
+serverMod.hopRetries = 0
+serverMod.hopRetryStamp = -math.huge
+serverMod.sameRetries = 0
+serverMod.sameRetryInFlight = false
+
+local function refreshServerUI()
+	if ui.refreshServer then
+		ui.refreshServer()
+	end
+end
+
+-- Fungsi HTTP milik executor (HttpService biasa tidak boleh mengakses roblox.com dari dalam game).
+local function findHttpRequest()
+	local sources = {
+		globalEnv.request,
+		globalEnv.http_request,
+		type(globalEnv.syn) == "table" and globalEnv.syn.request or nil,
+		type(globalEnv.http) == "table" and globalEnv.http.request or nil,
+		type(globalEnv.fluxus) == "table" and globalEnv.fluxus.request or nil,
+	}
+	for index = 1, 5 do
+		if type(sources[index]) == "function" then
+			return sources[index]
+		end
+	end
+	return nil
+end
+serverMod.findHttp = findHttpRequest
+
+local function rememberJob(jobId)
+	if type(jobId) ~= "string" or jobId == "" then
+		return
+	end
+	local history = serverMod.history
+	local existing = table.find(history, jobId)
+	if existing then
+		table.remove(history, existing)
+	end
+	table.insert(history, 1, jobId)
+	while #history > CONFIG.HopHistoryMax do
+		table.remove(history)
+	end
+end
+
+-- Daftar server publik (API Roblox lewat executor). Mengembalikan daftar (mungkin parsial) dan pesan error.
+local function fetchPublicServers(pages)
+	local request = findHttpRequest()
+	if not request then
+		return nil, "Executor ini tidak menyediakan request/http_request."
+	end
+	local out = {}
+	local cursor = nil
+	for _ = 1, pages do
+		local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100", game.PlaceId)
+		if cursor then
+			url = url .. "&cursor=" .. HttpService:UrlEncode(cursor)
+		end
+		local okRequest, response = pcall(request, { Url = url, Method = "GET" })
+		if not okRequest or type(response) ~= "table" then
+			return (#out > 0) and out or nil, "Permintaan daftar server gagal: " .. tostring(response)
+		end
+		local status = response.StatusCode or (response.Success and 200 or nil)
+		if status == 429 then
+			return (#out > 0) and out or nil, "Dibatasi Roblox (HTTP 429). Tunggu beberapa detik lalu coba lagi."
+		end
+		if status ~= 200 then
+			return (#out > 0) and out or nil, "Daftar server ditolak (HTTP " .. tostring(status) .. ")."
+		end
+		local okJson, data = pcall(HttpService.JSONDecode, HttpService, response.Body)
+		if not okJson or type(data) ~= "table" or type(data.data) ~= "table" then
+			return (#out > 0) and out or nil, "Respons daftar server tidak valid."
+		end
+		for _, entry in ipairs(data.data) do
+			if type(entry) == "table" and type(entry.id) == "string" then
+				table.insert(out, {
+					id = entry.id,
+					playing = tonumber(entry.playing) or 0,
+					max = tonumber(entry.maxPlayers) or 0,
+					ping = tonumber(entry.ping),
+					fps = tonumber(entry.fps),
+				})
+			end
+		end
+		cursor = data.nextPageCursor
+		if type(cursor) ~= "string" or cursor == "" then
+			break
+		end
+		task.wait(0.6)
+	end
+	return out, nil
+end
+
+-- Pilih server tujuan hop: bukan server ini, belum ada di riwayat, masih ada slot. low = pemain paling sedikit.
+local function pickHopServer(servers)
+	local seen = { [game.JobId] = true }
+	for _, jobId in ipairs(serverMod.history) do
+		seen[jobId] = true
+	end
+	local pool = {}
+	for _, entry in ipairs(servers) do
+		if not seen[entry.id] and entry.max > 0 and entry.playing >= 1 and entry.playing < entry.max - 1 then
+			table.insert(pool, entry)
+		end
+	end
+	if #pool == 0 then
+		-- Semua sudah pernah dikunjungi: longgarkan riwayat (tetap bukan server ini).
+		for _, entry in ipairs(servers) do
+			if entry.id ~= game.JobId and entry.max > 0 and entry.playing < entry.max - 1 then
+				table.insert(pool, entry)
+			end
+		end
+	end
+	if #pool == 0 then
+		return nil
+	end
+	if state.prefs.hopMode == "random" then
+		return pool[math.random(#pool)]
+	end
+	table.sort(pool, function(a, b)
+		return a.playing < b.playing
+	end)
+	return pool[1]
+end
+
+-- Teleport ke server tertentu (JobId). Mengembalikan true bila permintaan terkirim.
+function serverMod.joinJob(jobId)
+	if type(jobId) ~= "string" or jobId == "" then
+		return false, "Belum ada server yang dipilih."
+	end
+	rememberJob(jobId)
+	state.stats.hops += 1
+	local ok, err = pcall(function()
+		TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, player)
+	end)
+	if not ok then
+		return false, tostring(err)
+	end
+	return true
+end
+
+-- Cari server publik lain lalu teleport. Memanggil HTTP (yield): hanya dari thread.
+function serverMod.hopTeleport()
+	local servers, err = fetchPublicServers(2)
+	if not servers then
+		return false, err
+	end
+	local target = pickHopServer(servers)
+	if not target then
+		return false, err or "Tidak ada server lain yang cocok (penuh / sudah pernah dikunjungi)."
+	end
+	notify(string.format("Hop: pindah ke server dengan %d/%d pemain.", target.playing, target.max), "info")
+	return serverMod.joinJob(target.id)
+end
+
+-- Server browser
+function serverMod.refreshList()
+	if serverMod.listBusy or state.closed then
+		return
+	end
+	serverMod.listBusy = true
+	serverMod.listStatus = "Memuat daftar server..."
+	refreshServerUI()
+	spawnTask(function()
+		local servers, err = fetchPublicServers(1)
+		serverMod.listBusy = false
+		if state.closed then
+			return
+		end
+		local list = {}
+		for _, entry in ipairs(servers or {}) do
+			if entry.id ~= game.JobId then
+				table.insert(list, entry)
+			end
+		end
+		table.sort(list, function(a, b)
+			return a.playing < b.playing
+		end)
+		while #list > CONFIG.ServerListMax do
+			table.remove(list)
+		end
+		serverMod.list = list
+		if serverMod.selectedJob and not table.find(list, serverMod.selectedJob, 1) then
+			local found = false
+			for _, entry in ipairs(list) do
+				if entry.id == serverMod.selectedJob then
+					found = true
+					break
+				end
+			end
+			if not found then
+				serverMod.selectedJob = nil
+			end
+		end
+		if err then
+			serverMod.listStatus = err .. (#list > 0 and (" (" .. #list .. " server termuat)") or "")
+		else
+			serverMod.listStatus = string.format("%d server publik (pemain paling sedikit di atas).", #list)
+		end
+		refreshServerUI()
+	end)
+end
+
+function serverMod.joinSelected()
+	if not serverMod.selectedJob then
+		notify("Pilih server dulu dari daftar.", "warning")
+		return
+	end
+	serverMod.pendingJob = serverMod.selectedJob
+	spawnTask(function()
+		requestServerRejoin("Pindah ke server pilihan...", nil, "job")
+	end)
+end
+
+function serverMod.quickJoin()
+	spawnTask(function()
+		requestServerRejoin("Quick join: mencari server publik lain...", nil, "hop", nil, true)
+	end)
+end
+
+-- Teleport gagal:
+--  * tadi rejoin ke server yang sama + Kunci server sama ON: coba LAGI server yang sama (maks 3x, jeda 4 dtk) untuk kegagalan
+--    sementara; bila server sudah tidak ada / ditutup, berhenti dan tetap di server ini (TIDAK pindah ke server lain).
+--  * tadi sedang hop: coba server lain sampai 3 kali.
+state.hooks.teleportFailed = function(result, message)
+	if state.closed then
+		return
+	end
+	if serverMod.lastTarget == "same" and state.prefs.rejoinSameLock then
+		local permanent = result == Enum.TeleportResult.GameEnded
+			or result == Enum.TeleportResult.GameNotFound
+			or result == Enum.TeleportResult.Unauthorized
+		if permanent then
+			serverMod.sameRetries = 0
+			notify("Server ini sudah tidak bisa dimasuki lagi (ditutup/tidak ditemukan). Kunci server sama aktif, jadi script TIDAK pindah ke server lain. Matikan Kunci server sama bila ingin pindah.", "warning")
+			return
+		end
+		if serverMod.net.active then
+			return -- auto reconnect punya jadwal percobaan ulangnya sendiri
+		end
+		if serverMod.sameRetries >= 3 then
+			serverMod.sameRetries = 0
+			notify("Rejoin ke server yang sama gagal 3 kali. Tetap di server ini (Kunci server sama aktif).", "warning")
+			return
+		end
+		serverMod.sameRetries += 1
+		local attempt = serverMod.sameRetries
+		spawnTask(function()
+			task.wait(4)
+			if state.closed then
+				return
+			end
+			serverMod.sameRetryInFlight = true
+			local started = requestServerRejoin(string.format("Rejoin server yang sama gagal (%s). Mencoba lagi (%d/3)...", tostring(message or result), attempt), serverMod.lastResume, "same", true)
+			if not started then
+				serverMod.sameRetryInFlight = false
+			end
+		end)
+		return
+	end
+	if serverMod.lastTarget ~= "hop" then
+		return
+	end
+	local now = os.clock()
+	if now - serverMod.hopRetryStamp > 90 then
+		serverMod.hopRetries = 0
+	end
+	serverMod.hopRetryStamp = now
+	if serverMod.hopRetries >= 3 then
+		return
+	end
+	serverMod.hopRetries += 1
+	spawnTask(function()
+		task.wait(2)
+		requestServerRejoin(string.format("Server tujuan gagal (%s). Mencari server lain (%d/3)...", tostring(message or result), serverMod.hopRetries), serverMod.lastResume, "hop", true, true)
+	end)
+end
+
+-- AUTO RECONNECT saat koneksi putus ---------------------------------------------------------------
+local NET_KEYWORDS = { "internet", "lost connection", "connection lost", "disconnected", "koneksi", "timed out", "timeout" }
+
+local function isNetError(code, message)
+	for _, value in ipairs(CONFIG.NetErrorCodes) do
+		if value == code then
+			return true
+		end
+	end
+	if type(message) == "string" and message ~= "" then
+		local lower = message:lower()
+		if lower:find("kick", 1, true) or lower:find("ban", 1, true) then
+			return false
+		end
+		for _, word in ipairs(NET_KEYWORDS) do
+			if lower:find(word, 1, true) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- Pesan/kode error inti Roblox yang sedang tampil: apakah itu putus koneksi? (benar/salah, kode, pesan)
+local function currentNetError()
+	local okCode, code = pcall(function()
+		return GuiService:GetErrorCode().Value
+	end)
+	local okMessage, message = pcall(function()
+		return GuiService:GetErrorMessage()
+	end)
+	code = okCode and code or nil
+	message = okMessage and message or ""
+	return isNetError(code, message), code, message
+end
+
+local function beginNetReconnect(reason)
+	local net = serverMod.net
+	if state.closed or net.active or not state.prefs.netRejoin then
+		return
+	end
+	if not serverAllowed() then
+		ui.addLog("Auto reconnect dilewati: tipe server tidak sesuai Mode server.", "info", "Server")
+		return
+	end
+	net.active = true
+	net.attempts = 0
+	local resumeFind = state.find.running or state.find.scanning or state.find.loopEnabled
+	spawnTask(function()
+		notify(string.format("Koneksi terputus (%s). Auto reconnect mulai dalam %d detik...", tostring(reason), CONFIG.NetStartDelay), "warning")
+		state.hooks.fire("net", "Koneksi terputus: " .. tostring(reason))
+		refreshServerUI()
+		task.wait(CONFIG.NetStartDelay)
+		-- Pesan sudah hilang (salah deteksi / koneksi pulih sendiri)? Jangan rejoin tanpa perlu.
+		if not state.closed and net.active and not currentNetError() then
+			net.active = false
+			notify("Pesan koneksi terputus sudah hilang. Auto reconnect dibatalkan.", "info")
+			refreshServerUI()
+			return
+		end
+		while not state.closed and net.active and net.attempts < state.prefs.netTries do
+			net.attempts += 1
+			state.stats.reconnects += 1
+			local delay = CONFIG.NetRetryDelays[math.min(net.attempts, #CONFIG.NetRetryDelays)]
+			refreshServerUI()
+			requestServerRejoin(string.format("Auto reconnect: percobaan %d/%d...", net.attempts, state.prefs.netTries), resumeFind, nil, true)
+			task.wait(delay)
+		end
+		if not state.closed and net.active then
+			net.active = false
+			local text = string.format("Auto reconnect gagal setelah %d percobaan. Periksa internet Anda lalu rejoin manual.", net.attempts)
+			notify(text, "error")
+			state.hooks.fire("net", text)
+			refreshServerUI()
+		end
+	end)
+end
+
+local function checkConnectionError()
+	local isNet, code, message = currentNetError()
+	if isNet then
+		beginNetReconnect(code and ("kode " .. tostring(code)) or tostring(message))
+	end
+end
+
+-- PING, STALL, BATAS SESI ---------------------------------------------------------------------------------
+local function readPing()
+	local ok, value = pcall(function()
+		return StatsService.Network.ServerStatsItem["Data Ping"]:GetValue()
+	end)
+	if ok and isFinite(value) then
+		return value
+	end
+	return nil
+end
+
+local function readStallStat()
+	local name = state.prefs.stallStat
+	if name == "" then
+		return nil
+	end
+	local folder = player:FindFirstChild("leaderstats")
+	if not folder then
+		return nil
+	end
+	local lower = name:lower()
+	for _, child in ipairs(folder:GetChildren()) do
+		if child:IsA("ValueBase") and child.Name:lower() == lower then
+			return child.Value
+		end
+	end
+	return nil
+end
+
+local function findWorking()
+	local find = state.find
+	return find.running or find.scanning or find.loopEnabled or state.patrol.active
+end
+
+-- Batas sesi tercapai? Menjalankan aksi (stop / rejoin / hop) dan mengembalikan nama aksinya, atau nil.
+local function checkLimits()
+	if not state.prefs.limitOn or not serverAllowed() then
+		return nil
+	end
+	local minutes = state.prefs.limitMinutes
+	local items = state.prefs.limitItems
+	local reason
+	if minutes > 0 and serverMod.limitActive >= minutes * 60 then
+		reason = string.format("Batas waktu sesi %d menit tercapai.", minutes)
+	elseif items > 0 and state.stats.collected - serverMod.limitBase >= items then
+		reason = string.format("Batas %d item tercapai.", items)
+	end
+	if not reason then
+		return nil
+	end
+	serverMod.limitActive = 0
+	serverMod.limitBase = state.stats.collected
+	local action = state.prefs.limitAction
+	state.hooks.fire("limit", reason)
+	if action == "stop" then
+		state.patrol.active = false
+		state.patrol.token += 1
+		state.find.loopEnabled = false
+		stopFind()
+		notify(reason .. " Find dihentikan.", "warning")
+	else
+		local resume = true
+		spawnTask(function()
+			requestServerRejoin(reason .. (action == "hop" and " Pindah server..." or " Rejoin..."), resume, action == "hop" and "hop" or nil)
+		end)
+	end
+	return action
+end
+table.insert(state.hooks.afterItemList, function()
+	if checkLimits() then
+		return "stop"
+	end
+	return nil
+end)
+
+local function onServerModeChanged(allowed)
+	local first = serverMod.lastAllowed == nil
+	serverMod.lastAllowed = allowed
+	if not allowed then
+		if state.find.running or state.find.scanning then
+			stopFind()
+		end
+		state.patrol.active = false
+		state.patrol.token += 1
+		local text = string.format("Server ini bertipe %s, sedangkan Mode server = %s. Fitur otomatis dinonaktifkan di server ini.", effectiveServerType(), state.prefs.serverMode)
+		if first then
+			table.insert(pendingNotices, { text, "warning" })
+		else
+			notify(text, "warning")
+		end
+	elseif not first then
+		notify("Tipe server sesuai Mode server. Fitur otomatis aktif kembali.", "success")
+	end
+	antiSit.apply()
+	refreshServerUI()
+end
+serverMod.onModeChanged = onServerModeChanged
+state.hooks.applyAntiSit = antiSit.apply
+
+local function runServerMonitor()
+	local stallSince = os.clock()
+	local stallSignature = nil
+	while not state.closed do
+		task.wait(2)
+		if state.closed then
+			return
+		end
+		local now = os.clock()
+		local allowed = serverAllowed()
+		if allowed ~= serverMod.lastAllowed then
+			onServerModeChanged(allowed)
+		end
+
+		local ping = readPing()
+		serverMod.ping = ping
+		local working = findWorking()
+		if allowed then
+			-- Ping
+			if state.prefs.pingOn and ping then
+				if ping > state.prefs.pingLimit then
+					serverMod.pingStrikes += 1
+				else
+					serverMod.pingStrikes = 0
+				end
+				if serverMod.pingStrikes >= state.prefs.pingStrikes and now - serverMod.lastPingAction > 120 then
+					serverMod.pingStrikes = 0
+					serverMod.lastPingAction = now
+					local text = string.format("Ping tinggi: %d ms (batas %d ms).", ping, state.prefs.pingLimit)
+					if state.prefs.pingAction == "hop" and detectServerType() == "public" then
+						spawnTask(function()
+							requestServerRejoin(text .. " Pindah server...", nil, "hop")
+						end)
+					else
+						notify(text, "warning")
+						state.hooks.fire("ping", text)
+					end
+				end
+			else
+				serverMod.pingStrikes = 0
+			end
+
+			-- Stall: tidak ada kemajuan (item terkumpul / nilai leaderstat) selama N menit saat Find aktif
+			if state.prefs.stallOn and working then
+				local signature = tostring(state.stats.collected) .. "|" .. tostring(readStallStat())
+				if signature ~= stallSignature then
+					stallSignature = signature
+					stallSince = now
+				elseif now - stallSince >= state.prefs.stallMinutes * 60 then
+					stallSince = now
+					state.stats.stalls += 1
+					local text = string.format("Tidak ada progres selama %d menit.", state.prefs.stallMinutes)
+					local action = state.prefs.stallAction
+					state.hooks.fire("stall", text)
+					if action == "notify" then
+						notify(text, "warning")
+					else
+						spawnTask(function()
+							requestServerRejoin(text .. (action == "hop" and " Pindah server..." or " Rejoin..."), true, action == "hop" and "hop" or nil)
+						end)
+					end
+				end
+			else
+				stallSince = now
+				stallSignature = nil
+			end
+
+			-- Batas sesi
+			if working then
+				serverMod.limitActive += 2
+				checkLimits()
+			end
+		else
+			serverMod.pingStrikes = 0
+			stallSince = now
+		end
+		refreshServerUI()
+	end
+end
+
+startServerModule = function()
+	rememberJob(game.JobId)
+	serverMod.limitBase = state.stats.collected
+	serverMod.listStatus = serverMod.listStatus or "Belum dimuat."
+	connect(GuiService.ErrorMessageChanged, checkConnectionError)
+	if CoreGui then
+		spawnTask(function()
+			local okGui, overlay = pcall(function()
+				local gui = CoreGui:WaitForChild("RobloxPromptGui", 10)
+				return gui and gui:WaitForChild("promptOverlay", 10)
+			end)
+			if not okGui or not overlay then
+				return
+			end
+			connect(overlay.ChildAdded, function(child)
+				if child.Name == "ErrorPrompt" then
+					task.wait(0.4)
+					checkConnectionError()
+				end
+			end)
+		end)
+	end
+	spawnTask(runServerMonitor)
+end
+
+--------------------------------------------------------------------------------
+-- TOOLS: LOG FILE, WEBHOOK, HEMAT RESOURCE, HOTKEY, PRESET, CEK UPDATE
+--------------------------------------------------------------------------------
+local Lighting = game:GetService("Lighting")
+local tools = state.tools
+tools.webhookQueue = {}
+tools.webhookLast = -math.huge
+tools.webhookBusy = false
+tools.selectedPreset = nil
+
+-- Log ke file (dibuffer, ditulis tiap beberapa detik; ukuran dibatasi) ------------------------------------
+local function flushLog()
+	local buffer = tools.logBuffer
+	if #buffer == 0 then
+		return
+	end
+	if not state.prefs.logFile or type(writefile) ~= "function" then
+		table.clear(buffer)
+		return
+	end
+	local text = table.concat(buffer, "\n") .. "\n"
+	table.clear(buffer)
+	pcall(function()
+		if type(makefolder) == "function" and type(isfolder) == "function" and not isfolder(CONFIG.DataFolder) then
+			makefolder(CONFIG.DataFolder)
+		end
+		local existing = ""
+		if type(isfile) == "function" and type(readfile) == "function" and isfile(CONFIG.LogFile) then
+			existing = readfile(CONFIG.LogFile)
+		end
+		local combined = existing .. text
+		if #combined > CONFIG.LogFileMaxBytes then
+			combined = combined:sub(#combined - math.floor(CONFIG.LogFileMaxBytes * 0.7) + 1)
+		end
+		writefile(CONFIG.LogFile, combined)
+	end)
+end
+table.insert(cleanupHooks, flushLog)
+
+-- Webhook Discord ---------------------------------------------------------------------------------------------------
+local WEBHOOK_PREFIXES = {
+	"https://discord.com/api/webhooks/",
+	"https://discordapp.com/api/webhooks/",
+	"https://canary.discord.com/api/webhooks/",
+	"https://ptb.discord.com/api/webhooks/",
+}
+local WEBHOOK_TITLES = {
+	rejoin = "Rejoin / pindah server",
+	net = "Koneksi",
+	stall = "Tidak ada progres",
+	ping = "Ping tinggi",
+	limit = "Batas sesi",
+	deliver = "Setor",
+	summary = "Ringkasan sesi",
+	test = "Tes webhook",
+}
+local WEBHOOK_COLORS = { net = 15158332, stall = 15105570, ping = 15105570, limit = 3447003, summary = 3066993, test = 3066993 }
+
+local function validWebhookUrl(url)
+	if type(url) ~= "string" then
+		return false
+	end
+	for _, prefix in ipairs(WEBHOOK_PREFIXES) do
+		if url:sub(1, #prefix) == prefix and #url > #prefix + 10 then
+			return true
+		end
+	end
+	return false
+end
+
+local function formatDuration(seconds)
+	seconds = math.max(0, math.floor(seconds))
+	return string.format("%dj %02dm %02dd", math.floor(seconds / 3600), math.floor(seconds / 60) % 60, seconds % 60)
+end
+tools.formatDuration = formatDuration
+
+local function sendWebhookNow(item)
+	local url = state.prefs.webhookUrl
+	if not validWebhookUrl(url) then
+		return false, "URL webhook harus berawalan https://discord.com/api/webhooks/..."
+	end
+	local request = state.server.findHttp()
+	if not request then
+		return false, "Executor ini tidak menyediakan request/http_request."
+	end
+	local payload = {
+		username = "Isekai Autonomous System",
+		embeds = { {
+			title = WEBHOOK_TITLES[item.kind] or "Notifikasi",
+			description = tostring(item.text):sub(1, 1500),
+			color = WEBHOOK_COLORS[item.kind] or 10181046,
+			fields = {
+				{ name = "Pemain", value = player.Name, inline = true },
+				{ name = "Item", value = tostring(state.stats.collected), inline = true },
+				{ name = "Sesi", value = formatDuration(os.time() - state.stats.startedAt), inline = true },
+				{ name = "Server", value = string.format("%s • %s", game.JobId ~= "" and game.JobId:sub(1, 8) or "-", effectiveServerType()), inline = true },
+			},
+			timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+		} },
+	}
+	local okJson, body = pcall(HttpService.JSONEncode, HttpService, payload)
+	if not okJson then
+		return false, "Gagal menyusun data webhook."
+	end
+	local okRequest, response = pcall(request, {
+		Url = url,
+		Method = "POST",
+		Headers = { ["Content-Type"] = "application/json" },
+		Body = body,
+	})
+	if not okRequest then
+		return false, tostring(response)
+	end
+	local status = type(response) == "table" and (response.StatusCode or (response.Success and 204)) or nil
+	if type(status) == "number" and status >= 200 and status < 300 then
+		return true
+	end
+	return false, "HTTP " .. tostring(status)
+end
+
+local function pumpWebhook()
+	if tools.webhookBusy then
+		return
+	end
+	tools.webhookBusy = true
+	spawnTask(function()
+		while #tools.webhookQueue > 0 and not state.closed do
+			local item = table.remove(tools.webhookQueue, 1)
+			local wait = CONFIG.WebhookMinInterval - (os.clock() - tools.webhookLast)
+			if wait > 0 then
+				task.wait(wait)
+			end
+			tools.webhookLast = os.clock()
+			local ok, err = sendWebhookNow(item)
+			if not ok then
+				ui.addLog("Webhook gagal: " .. tostring(err), "warning", "Webhook")
+			end
+			if item.callback then
+				item.callback(ok, err)
+			end
+		end
+		tools.webhookBusy = false
+	end)
+end
+
+function tools.webhookEnqueue(kind, text, callback)
+	if #tools.webhookQueue >= 8 then
+		table.remove(tools.webhookQueue, 1)
+	end
+	table.insert(tools.webhookQueue, { kind = kind, text = text, callback = callback })
+	pumpWebhook()
+end
+
+state.hooks.webhook = function(kind, text)
+	local prefs = state.prefs
+	if not prefs.webhookOn or not validWebhookUrl(prefs.webhookUrl) then
+		return
+	end
+	local wanted = false
+	if kind == "rejoin" or kind == "net" then
+		wanted = prefs.whRejoin
+	elseif kind == "stall" or kind == "ping" then
+		wanted = prefs.whStall
+	elseif kind == "limit" then
+		wanted = prefs.whLimit
+	elseif kind == "summary" or kind == "deliver" then
+		wanted = true
+	end
+	if wanted then
+		tools.webhookEnqueue(kind, text)
+	end
+end
+
+function tools.webhookTest()
+	if not validWebhookUrl(state.prefs.webhookUrl) then
+		notify("Isi URL webhook Discord yang valid dulu (https://discord.com/api/webhooks/...).", "warning")
+		return
+	end
+	notify("Mengirim pesan tes ke webhook...", "info")
+	tools.webhookEnqueue("test", "Tes webhook dari Isekai Autonomous System.", function(ok, err)
+		if state.closed then
+			return
+		end
+		if ok then
+			notify("Webhook berhasil dikirim.", "success")
+		else
+			notify("Webhook gagal: " .. tostring(err), "error")
+		end
+	end)
+end
+
+-- Hemat resource (FPS cap, grafik rendah, layar hitam) ---------------------------------------------------------------------------
+local eco = { active = false, black = false, saved = {} }
+tools.eco = eco
+
+local function readFpsCap()
+	local getter = globalEnv.getfpscap
+	if type(getter) == "function" then
+		local ok, value = pcall(getter)
+		if ok and isFinite(value) and value >= 0 then
+			return value
+		end
+	end
+	return 60
+end
+
+function eco.setBlack(on)
+	if eco.black == on then
+		return
+	end
+	eco.black = on
+	pcall(function()
+		RunService:Set3dRenderingEnabled(not on)
+	end)
+	if ui.refreshTools then
+		ui.refreshTools()
+	end
+end
+
+function eco.setFps(value)
+	local setter = globalEnv.setfpscap
+	if type(setter) == "function" then
+		pcall(setter, value)
+	end
+end
+
+function eco.enable()
+	if eco.active or state.closed then
+		return
+	end
+	eco.active = true
+	if type(globalEnv.setfpscap) == "function" then
+		eco.saved.fps = readFpsCap()
+		eco.setFps(state.prefs.ecoFps)
+	end
+	if state.prefs.ecoLowGfx then
+		pcall(function()
+			eco.saved.quality = settings().Rendering.QualityLevel
+			settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+		end)
+		pcall(function()
+			eco.saved.shadows = Lighting.GlobalShadows
+			Lighting.GlobalShadows = false
+		end)
+		pcall(function()
+			eco.saved.decoration = Workspace.Terrain.Decoration
+			Workspace.Terrain.Decoration = false
+		end)
+	end
+	if state.prefs.ecoBlack then
+		eco.setBlack(true)
+	end
+end
+
+function eco.disable()
+	eco.setBlack(false)
+	if not eco.active then
+		return
+	end
+	eco.active = false
+	local saved = eco.saved
+	if saved.fps ~= nil then
+		eco.setFps(saved.fps)
+	end
+	if saved.quality ~= nil then
+		pcall(function()
+			settings().Rendering.QualityLevel = saved.quality
+		end)
+	end
+	if saved.shadows ~= nil then
+		pcall(function()
+			Lighting.GlobalShadows = saved.shadows
+		end)
+	end
+	if saved.decoration ~= nil then
+		pcall(function()
+			Workspace.Terrain.Decoration = saved.decoration
+		end)
+	end
+	eco.saved = {}
+end
+
+function eco.apply()
+	if state.prefs.ecoOn then
+		if eco.active then
+			eco.setFps(state.prefs.ecoFps)
+		else
+			eco.enable()
+		end
+	else
+		eco.disable()
+	end
+end
+table.insert(cleanupHooks, eco.disable)
+
+-- Hotkey ---------------------------------------------------------------------------------------------------------------------------
+function tools.stopAll()
+	if state.find.running or state.find.scanning then
+		stopFind()
+	end
+	state.find.loopEnabled = false
+	state.patrol.active = false
+	state.patrol.token += 1
+	for _, hook in ipairs(tools.stopHooks) do
+		pcall(hook)
+	end
+	if state.busy then
+		cancelMove()
+	end
+	notify("Semua proses otomatis dihentikan.", "info")
+	refreshUI()
+end
+
+state.hooks.hotkey = function(input)
+	local name = input.KeyCode.Name
+	local prefs = state.prefs
+	if name == "Unknown" then
+		return false
+	end
+	if name == prefs.hkToggleUI then
+		setMinimized(not state.minimized)
+		return true
+	elseif name == prefs.hkFind then
+		if state.find.running or state.find.scanning then
+			stopFind()
+		else
+			startFind(false)
+		end
+		return true
+	elseif name == prefs.hkStopAll then
+		tools.stopAll()
+		return true
+	elseif name == prefs.hkBlack then
+		eco.setBlack(not eco.black)
+		return true
+	end
+	return false
+end
+
+-- Preset pengaturan -------------------------------------------------------------------------------------------------------------------
+-- Preset memuat semua preferensi KECUALI URL webhook dan link server private (rahasia, tidak ikut diekspor).
+local PRESET_SKIP = { webhookUrl = true, privateLink = true, npcRunning = true }
+
+function tools.snapshot()
+	local data = {}
+	for key, def in pairs(PREF_DEFS) do
+		if not PRESET_SKIP[key] then
+			data[key] = state.prefs[key]
+		end
+	end
+	return data
+end
+
+local function afterPrefsApplied()
+	persistSavedData()
+	eco.apply()
+	if state.hooks.applyAntiSit then
+		state.hooks.applyAntiSit()
+	end
+	local allowed = serverAllowed()
+	if state.server.onModeChanged and allowed ~= state.server.lastAllowed then
+		state.server.onModeChanged(allowed)
+	end
+	refreshUI()
+end
+
+function tools.applyData(data)
+	local clean = {}
+	if type(data) ~= "table" then
+		return false
+	end
+	for key in pairs(PREF_DEFS) do
+		if not PRESET_SKIP[key] and data[key] ~= nil then
+			clean[key] = data[key]
+		end
+	end
+	loadPrefs(clean)
+	afterPrefsApplied()
+	return true
+end
+
+function tools.savePreset(rawName)
+	local name, err = sanitizeName(rawName)
+	if not name or name == "" then
+		notify(err or "Isi nama preset dulu.", "warning")
+		return
+	end
+	for _, preset in ipairs(state.presets) do
+		if preset.name == name then
+			preset.data = tools.snapshot()
+			persistSavedData()
+			notify(string.format("Preset \"%s\" diperbarui.", name), "success")
+			if ui.refreshTools then
+				ui.refreshTools()
+			end
+			return
+		end
+	end
+	if #state.presets >= CONFIG.PresetsMax then
+		notify(string.format("Preset penuh (maks %d). Hapus salah satu dulu.", CONFIG.PresetsMax), "warning")
+		return
+	end
+	table.insert(state.presets, { name = name, data = tools.snapshot() })
+	tools.selectedPreset = #state.presets
+	persistSavedData()
+	notify(string.format("Preset \"%s\" disimpan.", name), "success")
+	if ui.refreshTools then
+		ui.refreshTools()
+	end
+end
+
+function tools.loadPreset()
+	local preset = tools.selectedPreset and state.presets[tools.selectedPreset]
+	if not preset then
+		notify("Pilih preset dulu.", "warning")
+		return
+	end
+	tools.applyData(preset.data)
+	notify(string.format("Preset \"%s\" dimuat. Tema baru berlaku setelah script dimuat ulang.", preset.name), "success")
+end
+
+function tools.deletePreset()
+	local preset = tools.selectedPreset and state.presets[tools.selectedPreset]
+	if not preset then
+		notify("Pilih preset dulu.", "warning")
+		return
+	end
+	table.remove(state.presets, tools.selectedPreset)
+	tools.selectedPreset = nil
+	persistSavedData()
+	notify(string.format("Preset \"%s\" dihapus.", preset.name), "info")
+	if ui.refreshTools then
+		ui.refreshTools()
+	end
+end
+
+function tools.exportSettings()
+	local okJson, text = pcall(HttpService.JSONEncode, HttpService, tools.snapshot())
+	if not okJson then
+		notify("Gagal mengekspor pengaturan.", "error")
+		return
+	end
+	local copier = globalEnv.setclipboard or globalEnv.toclipboard
+	if type(copier) == "function" and pcall(copier, text) then
+		notify("Pengaturan disalin ke clipboard (URL webhook dan link private tidak ikut).", "success")
+	elseif ui.importBox then
+		ui.importBox.Text = text
+		notify("Clipboard tidak tersedia. Teks pengaturan ditaruh di kotak Impor; salin manual.", "warning")
+	end
+end
+
+function tools.importSettings()
+	local raw = ui.importBox and ui.importBox.Text or ""
+	if raw == "" then
+		notify("Tempel teks pengaturan (JSON) di kotak Impor dulu.", "warning")
+		return
+	end
+	local ok, data = pcall(HttpService.JSONDecode, HttpService, raw)
+	if not ok or type(data) ~= "table" then
+		notify("Teks pengaturan tidak valid.", "error")
+		return
+	end
+	tools.applyData(data)
+	ui.importBox.Text = ""
+	notify("Pengaturan diimpor. Tema baru berlaku setelah script dimuat ulang.", "success")
+end
+
+-- Cek update: bandingkan ScriptRevision di URL raw (tab Advanced) dengan versi ini ------------------------------------------------------
+function tools.checkUpdate(manual)
+	local url = state.advanced.scriptUrl
+	if not isValidHttpUrl(url) then
+		if manual then
+			notify("Isi URL raw script di tab Advanced (Autoexecute) dulu.", "warning")
+		end
+		return
+	end
+	spawnTask(function()
+		local okGet, body = pcall(function()
+			return game:HttpGet(url)
+		end)
+		if (not okGet or type(body) ~= "string") and state.server.findHttp() then
+			local okReq, response = pcall(state.server.findHttp(), { Url = url, Method = "GET" })
+			if okReq and type(response) == "table" and type(response.Body) == "string" then
+				body = response.Body
+				okGet = true
+			end
+		end
+		if state.closed then
+			return
+		end
+		if not okGet or type(body) ~= "string" then
+			if manual then
+				notify("Gagal mengambil script dari URL untuk cek update.", "warning")
+			end
+			return
+		end
+		local remote = tonumber(body:match("ScriptRevision%s*=%s*(%d+)"))
+		if not remote then
+			if manual then
+				notify("Penanda versi tidak ditemukan di script pada URL itu.", "warning")
+			end
+		elseif remote > CONFIG.ScriptRevision then
+			notify(string.format("Versi baru tersedia (rev %d, kamu rev %d). Jalankan ulang script dari URL.", remote, CONFIG.ScriptRevision), "success")
+		elseif manual then
+			notify(string.format("Sudah versi terbaru (rev %d).", CONFIG.ScriptRevision), "info")
+		end
+	end)
+end
+
+-- Heartbeat untuk Watchdog Windows: file kecil yang diperbarui tiap 20 detik selama script hidup.
+-- status "disconnected" = layar disconnect Roblox sedang tampil (baik auto reconnect aktif maupun tidak).
+local function writeHeartbeat()
+	if not state.prefs.watchdog or type(writefile) ~= "function" then
+		return
+	end
+	local net = state.server.net
+	local disconnected = net ~= nil and net.active == true
+	if not disconnected then
+		local okCode, code = pcall(function()
+			return GuiService:GetErrorCode().Value
+		end)
+		local okMessage, message = pcall(function()
+			return GuiService:GetErrorMessage()
+		end)
+		disconnected = isNetError(okCode and code or nil, okMessage and message or "")
+	end
+	local data = {
+		t = os.time(),
+		placeId = game.PlaceId,
+		jobId = game.JobId,
+		serverType = detectServerType(),
+		player = player.Name,
+		status = disconnected and "disconnected" or "ok",
+		collected = state.stats.collected,
+	}
+	local okJson, text = pcall(HttpService.JSONEncode, HttpService, data)
+	if not okJson then
+		return
+	end
+	pcall(function()
+		if type(makefolder) == "function" and type(isfolder) == "function" and not isfolder(CONFIG.DataFolder) then
+			makefolder(CONFIG.DataFolder)
+		end
+		writefile(CONFIG.DataFolder .. "/heartbeat.json", text)
+	end)
+end
+
+local function startToolsModule()
+	spawnTask(function()
+		while not state.closed do
+			task.wait(12)
+			flushLog()
+		end
+	end)
+	spawnTask(function()
+		local last = os.clock()
+		while not state.closed do
+			task.wait(30)
+			local minutes = state.prefs.whSummaryMin
+			if state.prefs.webhookOn and minutes > 0 and os.clock() - last >= minutes * 60 then
+				last = os.clock()
+				tools.webhookEnqueue("summary", string.format(
+					"Item %d • rejoin %d • hop %d • stall %d • reconnect %d",
+					state.stats.collected, state.stats.rejoins, state.stats.hops, state.stats.stalls, state.stats.reconnects
+				))
+			end
+		end
+	end)
+	spawnTask(function()
+		while not state.closed do
+			writeHeartbeat()
+			task.wait(20)
+		end
+	end)
+	eco.apply()
+	connect(RunService.RenderStepped, updateTracers)
+	if state.prefs.updateCheck then
+		task.delay(8, function()
+			if not state.closed then
+				tools.checkUpdate(false)
+			end
+		end)
+	end
+end
+startToolsHook = startToolsModule
+
+--------------------------------------------------------------------------------
+-- OTOMASI: PATROL, SETOR (DELIVER), AKSI TERJADWAL
+--------------------------------------------------------------------------------
+local patrol = state.patrol
+patrol.current = nil
+patrol.findRunning = false
+local deliver = { running = false, token = 0, baseItems = 0, baseTime = os.clock() }
+state.deliver = deliver
+state.deliverHold = false
+
+local function promptPosition(prompt)
+	local parent = prompt.Parent
+	if parent and parent:IsA("BasePart") then
+		return parent.Position
+	end
+	if parent and parent:IsA("Attachment") then
+		return parent.WorldPosition
+	end
+	if parent and parent:IsA("Model") then
+		local ok, pivot = pcall(parent.GetPivot, parent)
+		if ok then
+			return pivot.Position
+		end
+	end
+	return nil
+end
+
+-- Menekan tombol dan/atau memicu ProximityPrompt terdekat (<= 40 stud) yang teksnya memuat promptText.
+-- Mengembalikan true bila ada aksi yang dikirim.
+local function interactWith(keyName, promptText)
+	local acted = false
+	if promptText ~= "" and type(fireproximityprompt) == "function" then
+		local _, _, root = getCharacterParts()
+		if root then
+			local needle = promptText:lower()
+			local best, bestDistance = nil, 40
+			for index, inst in ipairs(Workspace:GetDescendants()) do
+				if index % 3000 == 0 then
+					task.wait()
+					if state.closed then
+						return false
+					end
+				end
+				if inst:IsA("ProximityPrompt") and inst.Enabled then
+					local text = (tostring(inst.ActionText) .. " " .. tostring(inst.ObjectText)):lower()
+					if text:find(needle, 1, true) then
+						local position = promptPosition(inst)
+						if position then
+							local distance = (position - root.Position).Magnitude
+							if distance < bestDistance then
+								best, bestDistance = inst, distance
+							end
+						end
+					end
+				end
+			end
+			if best then
+				local ok = pcall(fireproximityprompt, best)
+				acted = ok or acted
+			end
+		end
+	end
+	local keyCode = keyName ~= "" and resolveKeyCode(keyName) or nil
+	if keyCode then
+		pressKey(keyCode)
+		acted = true
+	end
+	return acted
+end
+
+-- PATROL ---------------------------------------------------------------------------------------------------------------
+function patrol.stop(silent)
+	if not patrol.active then
+		return
+	end
+	patrol.active = false
+	patrol.token += 1
+	patrol.current = nil
+	if patrol.findRunning then
+		patrol.findRunning = false
+		stopFind()
+	end
+	if state.busy then
+		cancelMove()
+	end
+	if not silent then
+		notify("Patrol dihentikan.", "info")
+	end
+	if ui.refreshTools then
+		ui.refreshTools()
+	end
+end
+table.insert(tools.stopHooks, function()
+	patrol.stop(true)
+end)
+
+function patrol.start()
+	if patrol.active then
+		patrol.stop(false)
+		return
+	end
+	if not serverAllowed() then
+		notify("Patrol dilewati: tipe server tidak sesuai Mode server.", "warning")
+		return
+	end
+	if #visibleSlots() == 0 then
+		notify("Simpan minimal satu slot posisi di tab Return dulu.", "warning")
+		return
+	end
+	local find = state.find
+	if state.busy or find.running or find.scanning then
+		notify("Hentikan Find / Return dulu sebelum memulai Patrol.", "warning")
+		return
+	end
+	patrol.active = true
+	patrol.token += 1
+	local token = patrol.token
+	notify(string.format("Patrol dimulai: berkeliling %d slot, berhenti %d detik di tiap slot.", #visibleSlots(), state.prefs.patrolDwell), "success")
+	if ui.refreshTools then
+		ui.refreshTools()
+	end
+	spawnTask(function()
+		local function alive()
+			return not state.closed and patrol.active and patrol.token == token and serverAllowed()
+		end
+		local failStreak = 0
+		while alive() do
+			local list = visibleSlots()
+			if #list == 0 then
+				break
+			end
+			for _, slot in ipairs(list) do
+				if not alive() then
+					break
+				end
+				patrol.current = slot.name
+				if ui.refreshTools then
+					ui.refreshTools()
+				end
+				waitForCharacter(30)
+				local ok = moveToSavedSpot(slot, "patrol")
+				if not alive() then
+					break
+				end
+				if ok then
+					failStreak = 0
+					local untilTime = os.clock() + state.prefs.patrolDwell
+					while alive() and os.clock() < untilTime do
+						task.wait(0.25)
+					end
+					if state.prefs.patrolFind and alive() then
+						patrol.findRunning = true
+						startFind(false)
+						task.wait(0.5)
+						while alive() and (find.running or find.scanning) do
+							task.wait(0.5)
+						end
+						patrol.findRunning = false
+					end
+				else
+					failStreak += 1
+					if failStreak >= 3 then
+						notify("Patrol berhenti: 3 kali berturut-turut gagal menuju slot.", "warning")
+						patrol.active = false
+						break
+					end
+					task.wait(3)
+				end
+			end
+		end
+		if patrol.token == token then
+			patrol.active = false
+			patrol.current = nil
+			if not state.closed then
+				if ui.refreshTools then
+					ui.refreshTools()
+				end
+			end
+		end
+	end)
+end
+
+-- SETOR (DELIVER) ---------------------------------------------------------------------------------------------------------
+-- Slot tujuan: slot bernama mengandung "setor" / "deliver" / "jual" / "sell"; bila tak ada, slot yang sedang dipilih.
+function deliver.slot()
+	for _, slot in ipairs(visibleSlots()) do
+		local lower = slot.name:lower()
+		if lower:find("setor", 1, true) or lower:find("deliver", 1, true) or lower:find("jual", 1, true) or lower:find("sell", 1, true) then
+			return slot
+		end
+	end
+	return getSelectedSlot()
+end
+
+function deliver.begin()
+	deliver.running = true
+	deliver.token += 1
+	local token = deliver.token
+	local find = state.find
+	state.deliverHold = true
+	-- Hentikan sesi Find yang sedang berjalan (token dibatalkan) agar tidak bentrok dengan perjalanan setor.
+	find.token += 1
+	state.moveToken += 1
+	local resume = true
+	spawnTask(function()
+		local function valid()
+			return not state.closed and deliver.token == token
+		end
+		local waited = os.clock()
+		while (find.running or find.scanning or state.busy) and os.clock() - waited < 20 and valid() do
+			task.wait(0.2)
+		end
+		local slot = deliver.slot()
+		local collected = state.stats.collected
+		if slot and valid() then
+			notify(string.format("Setor: menuju \"%s\"...", slot.name), "info")
+			waitForCharacter(30)
+			local ok = moveToSavedSpot(slot, "patrol")
+			if ok and valid() then
+				task.wait(0.6)
+				interactWith(state.prefs.deliverKey, state.prefs.deliverPrompt)
+				local untilTime = os.clock() + state.prefs.deliverDwell
+				while valid() and os.clock() < untilTime do
+					task.wait(0.25)
+				end
+				if valid() then
+					local text = string.format("Setor selesai di \"%s\" (item terkumpul total %d).", slot.name, collected)
+					notify(text, "success")
+					state.hooks.fire("deliver", text)
+				end
+			elseif valid() then
+				notify("Setor gagal: karakter tidak sampai ke slot tujuan.", "warning")
+			end
+		elseif valid() then
+			notify("Setor dilewati: belum ada slot posisi (beri nama \"Setor\" atau pilih slotnya).", "warning")
+		end
+		if deliver.token == token then
+			deliver.running = false
+			state.deliverHold = false
+			deliver.baseItems = state.stats.collected
+			deliver.baseTime = os.clock()
+			if resume and valid() and serverAllowed() and not find.running and not find.scanning then
+				startFind(false)
+			end
+		end
+	end)
+end
+
+table.insert(tools.stopHooks, function()
+	if deliver.running then
+		deliver.token += 1
+		deliver.running = false
+		state.deliverHold = false
+	end
+end)
+
+table.insert(state.hooks.afterItemList, function()
+	local prefs = state.prefs
+	if not prefs.deliverOn or deliver.running or not serverAllowed() then
+		return nil
+	end
+	local items, minutes = prefs.deliverItems, prefs.deliverMinutes
+	local due = (items > 0 and state.stats.collected - deliver.baseItems >= items)
+		or (minutes > 0 and os.clock() - deliver.baseTime >= minutes * 60)
+	if not due then
+		return nil
+	end
+	deliver.begin()
+	return "stop"
+end)
+
+--------------------------------------------------------------------------------
+-- MODE NPC + SAPA PEMAIN DEKAT (v12.5)
+--------------------------------------------------------------------------------
+-- Mode NPC: karakter berperilaku seperti NPC. Wander = titik acak di sekitar pusat, Patrol = slot posisi dalam urutan acak,
+--   Penjaga = diam di pos. Di antara langkah ada jeda diam acak + menoleh. Berjalan lewat pejalan yang sama dengan
+--   Return/Patrol, tetapi dengan source = "npc": tanpa toast tiap tiba dan TANPA teleport cadangan (titik yang tak
+--   terjangkau cukup dilewati). Pusat = slot posisi bernama mengandung "npc"; tanpa itu = posisi saat Mulai.
+-- Sapa: pemain lain yang berada dalam jarak tertentu disapa lewat chat ("Selamat datang {name}!"), SEKALI per pemain
+--   sampai dia keluar lalu masuk lagi. Daftar disimpan di globalEnv per JobId, jadi rejoin ke server yang sama tidak menyapa ulang.
+-- MODE NPC + SAPA PEMAIN DEKAT (v13.0) ----------------------------------------------------------------------------------------
+-- Mode NPC: karakter berperilaku seperti NPC (Wander / Patrol / Penjaga) + kembali ke pos awal bila lama tidak menyapa.
+-- Sapa: mengetik sapaan di chat bila ada pemain dekat (sekali per pemain), dengan daftar pesan, deteksi spam/####, emote,
+-- daftar abaikan, dan visual jarak (cincin + label stud) yang bisa dimatikan.
+local npc = state.npc
+npc.retries = {} -- userId -> jumlah percobaan ulang sapaan (spam / ####)
+npc.greetIndex = 0 -- penunjuk pesan untuk mode berurutan
+npc.lastTemplateIndex = nil
+npc.friendCache = {}
+npc.lastGreetAt = os.clock()
+npc.homeAfter = 180
+npc.homeRef = nil -- slot (atau slot semu) yang menjadi "pos awal" NPC
+npc.pauseReason = nil
+npc.chatPending = nil
+npc.emoteCache = {} -- assetId -> daftar objek Animation untuk emote avatar
+npc.emoteWarnAt = 0
+npc.emoteTrack = nil
+npc.greetDepth = 0 -- >0 selama menyapa / tes emote: Mode NPC berhenti berjalan dan tidak menoleh acak (lihat npc.isGreeting)
+npc.greetingAt = 0
+npc.walkCancelled = false -- perjalanan NPC dibatalkan oleh sapaan (bukan kegagalan jalan)
+npc.preGreetLook = nil -- arah hadap sebelum menoleh ke pemain (untuk kembali setelah menyapa)
+npc.viz = { folder = nil, rings = {}, tags = {}, nextSlow = 0, groundY = nil, wanderY = nil, wanderAt = 0 }
+
+function npc.refresh()
+	if ui.refreshNpc then
+		ui.refreshNpc()
+	end
+end
+
+function npc.setStatus(text)
+	npc.status = text
+	npc.refresh()
+end
+
+-- Sedang menyapa? Penghitung (bukan boolean) + pengaman: dianggap basi bila lebih dari 30 dtk (mis. chat / emote menggantung)
+-- supaya Mode NPC tidak pernah macet selamanya.
+function npc.isGreeting()
+	if npc.greetDepth > 0 and os.clock() - npc.greetingAt > 30 then
+		npc.greetDepth = 0
+	end
+	return npc.greetDepth > 0
+end
+
+function npc.beginGreeting()
+	npc.greetDepth += 1
+	npc.greetingAt = os.clock()
+end
+
+function npc.endGreeting()
+	npc.greetDepth = math.max(0, npc.greetDepth - 1)
+end
+
+-- Menjalankan fn di thread sendiri dan menunggu paling lama `timeout` detik (panggilan yang bisa yield selamanya, mis.
+-- BindableFunction:Invoke tanpa OnInvoke atau game:GetObjects). Mengembalikan (selesai, ok, nilai).
+function npc.callTimed(timeout, fn)
+	local box = nil
+	local thread = task.spawn(function()
+		local ok, value = pcall(fn)
+		box = { ok = ok, value = value }
+	end)
+	local deadline = os.clock() + timeout
+	while not box and os.clock() < deadline and not state.closed do
+		task.wait(0.05)
+	end
+	if not box then
+		pcall(task.cancel, thread)
+		return false
+	end
+	return true, box.ok, box.value
+end
+
+function npc.alive(token)
+	return not state.closed and npc.active and npc.token == token and serverAllowed()
+end
+
+-- Pos awal NPC: slot bernama "NPC"; bila tidak ada, slot Return yang sedang dipilih (di game ini); bila tidak ada juga, nil
+-- (nanti memakai pose karakter saat Mulai).
+function npc.homeSlot()
+	for _, slot in ipairs(visibleSlots()) do
+		if slot.name:lower():find("npc", 1, true) then
+			return slot
+		end
+	end
+	return getSelectedSlot()
+end
+
+-- Menentukan kapan NPC kembali ke pos awal bila tidak menyapa: acak antara batas bawah dan atas (menit).
+function npc.scheduleHome()
+	local low = state.prefs.npcHomeMin
+	local high = math.max(low, state.prefs.npcHomeMax)
+	npc.homeAfter = (low + math.random() * (high - low)) * 60
+	npc.lastGreetAt = os.clock()
+end
+
+-- Berjalan (diam, tanpa toast, TANPA teleport cadangan). Mengembalikan true bila tiba.
+function npc.go(slot)
+	if npc.isGreeting() then -- sapaan dimulai saat memilih titik: jangan mulai berjalan
+		npc.walkCancelled = true
+		return false
+	end
+	npc.walking = true
+	local ok = moveToSavedSpot(slot, "npc")
+	npc.walking = false
+	return ok
+end
+
+-- Kembali ke pos awal seperti tombol Return: arah hadap dan kamera tersimpan dipulihkan, dan teleport cadangan mengikuti
+-- pengaturan Return (tab Return). Mengembalikan true bila tiba.
+function npc.goHome(text)
+	local ref = npc.homeRef
+	if not ref then
+		return false
+	end
+	if npc.isGreeting() then
+		npc.walkCancelled = true
+		return false
+	end
+	npc.setStatus(text or "Kembali ke pos awal...")
+	npc.walking = true
+	local ok = moveToSavedSpot(ref, "npchome")
+	npc.walking = false
+	return ok
+end
+
+function npc.walkTo(position, from)
+	local direction = flatten(position - from)
+	local cf = direction.Magnitude > 0.1 and CFrame.lookAt(position, position + direction.Unit) or CFrame.new(position)
+	return npc.go({ id = "npc", name = "titik NPC", cf = cf, placeId = game.PlaceId })
+end
+
+-- Titik acak di sekitar pusat: ada tanah datar, bukan air / benda berbahaya, tidak jauh beda tinggi dari pusat,
+-- dan punya rute (Pathfinding). Mengembalikan posisi berdiri atau nil.
+function npc.pickPoint(character, humanoid, root)
+	local center = npc.center or root.Position
+	local radius = state.prefs.npcRadius
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+	params.RespectCanCollide = true
+	local standHit = Workspace:Raycast(root.Position, Vector3.new(0, -12, 0), params)
+	local standHeight = standHit and (root.Position.Y - standHit.Position.Y) or 3
+	for _ = 1, 5 do
+		if state.closed then
+			return nil
+		end
+		local angle = math.random() * math.pi * 2
+		local distance = math.sqrt(math.random()) * radius
+		local x = center.X + math.cos(angle) * distance
+		local z = center.Z + math.sin(angle) * distance
+		local hit = Workspace:Raycast(Vector3.new(x, center.Y + 40, z), Vector3.new(0, -100, 0), params)
+		if hit and hit.Normal.Y > 0.75 and hit.Material ~= Enum.Material.Water
+			and math.abs(hit.Position.Y - center.Y) <= 15 and not isHazardInstance(hit.Instance) then
+			local target = hit.Position + Vector3.new(0, standHeight, 0)
+			if flatten(target - root.Position).Magnitude >= 6 then
+				local waypoints = computeWaypoints(root, humanoid, hit.Position, 0, { avoidWater = true })
+				if waypoints then
+					return target
+				end
+			end
+		end
+	end
+	return nil
+end
+
+function npc.lookAround(root)
+	if not root.Parent then
+		return
+	end
+	local delta = (math.random(2) == 1 and 1 or -1) * (30 + math.random() * 100)
+	tween(root, 0.45, { CFrame = root.CFrame * CFrame.Angles(0, math.rad(delta), 0) }, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+end
+
+-- Diam (acak, atau selama fixedDuration detik). Mengembalikan false bila mode dihentikan / pemain mengambil alih karakter.
+function npc.idle(token, humanoid, root, fixedDuration, noLook)
+	local low = state.prefs.npcDwellMin
+	local high = math.max(low, state.prefs.npcDwellMax)
+	local duration = fixedDuration or (low + math.random() * (high - low))
+	local startedAt = os.clock()
+	local untilTime = startedAt + duration
+	local nextLook = startedAt + 1 + math.random() * 3
+	local movedFor = 0
+	if not fixedDuration then
+		npc.setStatus(string.format("Diam %d dtk...", math.floor(duration + 0.5)))
+	end
+	while npc.alive(token) and os.clock() < untilTime do
+		task.wait(0.25)
+		local now = os.clock()
+		-- Pemain menggerakkan karakter sendiri (WASD / joystick) setelah jeda singkat pascajalan: ambil alih.
+		if now - startedAt > 1.2 and humanoid.Parent and humanoid.MoveDirection.Magnitude > 0.1 and not state.busy then
+			movedFor += 0.25
+			if movedFor >= 0.75 then
+				npc.stop("Mode NPC dihentikan: kamu menggerakkan karakter sendiri.")
+				return false
+			end
+		else
+			movedFor = 0
+		end
+		if state.prefs.npcLook and not noLook and now >= nextLook and not state.busy and not npc.isGreeting() and root.Parent then
+			nextLook = now + 2 + math.random() * 5
+			npc.lookAround(root)
+		end
+	end
+	return npc.alive(token)
+end
+
+function npc.run(token)
+	local failStreak = 0
+	local lastSlotId = nil
+	-- Mulai dari pos awal bila karakter jauh darinya (mis. setelah rejoin karakter muncul di titik spawn).
+	local home = npc.homeRef
+	if home and state.prefs.npcMode ~= "patrol" then
+		local _, _, root = waitForCharacter(30)
+		if root and npc.alive(token) and flatten(root.Position - home.cf.Position).Magnitude > math.max(state.prefs.npcRadius, 8) then
+			npc.goHome("Menuju pos awal NPC...")
+			npc.walkCancelled = false
+		end
+	end
+	while npc.alive(token) do
+		if npc.isGreeting() then -- sedang menyapa: diam di tempat dan menoleh ke pemain
+			task.wait(0.2)
+			continue
+		end
+		if state.busy then
+			task.wait(1)
+			continue
+		end
+		local character, humanoid, root = waitForCharacter(30)
+		if not root or humanoid.Health <= 0 then
+			task.wait(1)
+			continue
+		end
+
+		-- Lama tidak menyapa: kembali ke pos awal (arah seperti Return), tunggu di sana sebentar, lalu lanjut.
+		if state.prefs.npcHomeReturn and npc.homeRef and os.clock() - npc.lastGreetAt >= npc.homeAfter then
+			local arrived = npc.goHome("Lama tidak menyapa: kembali ke pos awal...")
+			if not npc.alive(token) then
+				break
+			end
+			if npc.walkCancelled then -- dibatalkan sapaan: lanjut setelah menyapa
+				npc.walkCancelled = false
+				continue
+			end
+			npc.scheduleHome()
+			if arrived then
+				npc.setStatus("Di pos awal, menunggu...")
+				local _, holdHumanoid, holdRoot = waitForCharacter(10)
+				if holdRoot and not npc.idle(token, holdHumanoid, holdRoot, state.prefs.npcHomeHold, true) then
+					break
+				end
+			end
+			continue
+		end
+
+		local mode = state.prefs.npcMode
+		local walked = true
+		if mode == "wander" then
+			npc.setStatus("Mencari titik untuk berjalan...")
+			local target = npc.pickPoint(character, humanoid, root)
+			if not npc.alive(token) then
+				break
+			end
+			if target then
+				npc.setStatus("Berjalan ke titik acak...")
+				walked = npc.walkTo(target, root.Position)
+			else
+				walked = false
+			end
+		elseif mode == "patrol" then
+			local list = visibleSlots()
+			if #list == 0 then
+				npc.stop("Mode NPC berhenti: mode Patrol butuh minimal satu slot posisi di game ini (simpan di tab Return).")
+				break
+			end
+			local index = math.random(#list)
+			if #list > 1 and list[index].id == lastSlotId then
+				index = index % #list + 1
+			end
+			local slot = list[index]
+			lastSlotId = slot.id
+			npc.setStatus("Berpatroli ke \"" .. slot.name .. "\"...")
+			walked = npc.go(slot)
+		else -- guard
+			local anchorPos = npc.center or root.Position
+			if flatten(root.Position - anchorPos).Magnitude > 6 then
+				npc.setStatus("Kembali ke pos jaga...")
+				walked = npc.walkTo(anchorPos, root.Position)
+			end
+		end
+		if not npc.alive(token) then
+			break
+		end
+		if npc.walkCancelled then -- perjalanan dihentikan sapaan, bukan gagal jalan
+			npc.walkCancelled = false
+			continue
+		end
+		if walked then
+			failStreak = 0
+		else
+			failStreak += 1
+		end
+		if failStreak >= 8 then
+			npc.stop("Mode NPC berhenti: 8 kali berturut-turut gagal berjalan (area terhalang atau terlalu sempit).")
+			break
+		end
+		if walked then
+			if not npc.idle(token, humanoid, root) then
+				break
+			end
+		else
+			task.wait(2)
+		end
+	end
+	-- Berhenti sendiri (mis. Mode server tidak cocok) tanpa lewat npc.stop.
+	if npc.token == token and npc.active then
+		npc.active = false
+		npc.status = "Dihentikan."
+		npc.refresh()
+	end
+end
+
+function npc.start(silent)
+	if npc.active then
+		return
+	end
+	if not serverAllowed() then
+		notify("Mode NPC dilewati: tipe server tidak sesuai Mode server.", "warning")
+		return
+	end
+	local find = state.find
+	if state.busy or find.running or find.scanning or state.patrol.active or state.deliverHold then
+		notify("Hentikan Find / Return / Patrol dulu sebelum memulai Mode NPC.", "warning")
+		return
+	end
+	local _, _, root = waitForCharacter(8)
+	if not root then
+		notify("Karakter belum siap. Mode NPC dibatalkan.", "warning")
+		return
+	end
+	-- Pos awal: slot "NPC" / slot Return terpilih; kalau tidak ada, pose karakter saat Mulai (setelah rejoin otomatis memakai
+	-- pose yang tersimpan, supaya "pos awal" tidak bergeser ke titik spawn).
+	local slot = npc.homeSlot()
+	if slot then
+		npc.homeRef = slot
+		npc.center = slot.cf.Position
+		npc.savedHome = nil
+	else
+		local cfHome = nil
+		local saved = npc.savedHome
+		if silent and saved and saved.placeId == game.PlaceId then
+			cfHome = deserializeCFrame(saved.cframe)
+		end
+		if not cfHome then
+			local _, yaw = root.CFrame:ToOrientation()
+			cfHome = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
+		end
+		npc.homeRef = { id = "npchome", name = "pos awal NPC", cf = cfHome, placeId = game.PlaceId }
+		npc.center = cfHome.Position
+		npc.savedHome = { placeId = game.PlaceId, cframe = { cfHome:GetComponents() } }
+	end
+	npc.scheduleHome()
+	npc.walkCancelled = false
+	npc.active = true
+	npc.token += 1
+	npc.status = "Mulai..."
+	local token = npc.token
+	state.prefs.npcRunning = true
+	persistSavedData()
+	if not silent then
+		notify(string.format("Mode NPC dimulai (%s). Pos awal: %s.", state.prefs.npcMode, slot and ("slot \"" .. slot.name .. "\"") or "posisi sekarang"), "success")
+	end
+	npc.refresh()
+	spawnTask(npc.run, token)
+end
+
+function npc.stop(message)
+	if not npc.active then
+		return
+	end
+	npc.active = false
+	npc.token += 1
+	npc.status = "Dihentikan."
+	state.prefs.npcRunning = false
+	persistSavedData()
+	if npc.walking then
+		state.moveToken += 1 -- batalkan perjalanan NPC yang sedang berjalan (diam, tanpa toast)
+	end
+	if message then
+		notify(message, "info")
+	end
+	npc.refresh()
+end
+
+function npc.toggle()
+	if npc.active then
+		npc.stop("Mode NPC dihentikan.")
+	else
+		npc.start(false)
+	end
+end
+
+table.insert(cleanupHooks, function()
+	npc.active = false
+	npc.token += 1
+end)
+
+-- SAPA PEMAIN DEKAT -------------------------------------------------------------------------------------------------------
+function npc.greetInit()
+	local mem = globalEnv.__IsekaiGreetMemory
+	if type(mem) ~= "table" or mem.jobId ~= game.JobId or type(mem.ids) ~= "table" then
+		mem = { jobId = game.JobId, ids = {} }
+		globalEnv.__IsekaiGreetMemory = mem
+	end
+	-- Pemain yang sudah tidak ada di server dianggap baru bila masuk lagi.
+	local present = {}
+	for _, other in ipairs(Players:GetPlayers()) do
+		present[other.UserId] = true
+	end
+	local count = 0
+	for userId in pairs(mem.ids) do
+		if present[userId] then
+			count += 1
+		else
+			mem.ids[userId] = nil
+		end
+	end
+	npc.greeted = mem.ids
+	npc.greetedCount = count
+end
+
+-- Daftar pesan sapaan (tambah / hapus). Perubahan langsung disimpan.
+function npc.addGreeting(raw)
+	local text = (tostring(raw or ""):gsub("%c", ""))
+	text = text:match("^%s*(.-)%s*$")
+	local def = PREF_DEFS.greetList
+	if text == "" then
+		notify("Tulis pesan sapaan dulu.", "warning")
+		return false
+	end
+	if #text > def.itemMax then
+		notify(string.format("Pesan terlalu panjang (maks %d karakter).", def.itemMax), "warning")
+		return false
+	end
+	local list = table.clone(state.prefs.greetList)
+	if #list >= def.maxItems then
+		notify(string.format("Daftar penuh (maks %d pesan). Hapus satu dulu.", def.maxItems), "warning")
+		return false
+	end
+	for _, existing in ipairs(list) do
+		if existing:lower() == text:lower() then
+			notify("Pesan itu sudah ada di daftar.", "info")
+			return false
+		end
+	end
+	table.insert(list, text)
+	setPref("greetList", list)
+	persistSavedData()
+	if ui.greetAddBox then
+		ui.greetAddBox.Text = ""
+	end
+	if ui.renderGreetList then
+		ui.renderGreetList()
+	end
+	return true
+end
+
+function npc.removeGreeting(index)
+	local list = table.clone(state.prefs.greetList)
+	if not list[index] then
+		return
+	end
+	table.remove(list, index)
+	setPref("greetList", list)
+	persistSavedData()
+	if ui.renderGreetList then
+		ui.renderGreetList()
+	end
+end
+
+-- Memilih pesan: berurutan (satu per satu mengikuti daftar) atau acak (tanpa mengulang pesan yang sama berturut-turut).
+function npc.pickTemplate()
+	local list = state.prefs.greetList
+	if type(list) ~= "table" or #list == 0 then
+		return "Selamat datang {name}!"
+	end
+	if state.prefs.greetOrder == "sequential" then
+		npc.greetIndex = npc.greetIndex % #list + 1
+		return list[npc.greetIndex]
+	end
+	local index = math.random(#list)
+	if #list > 1 and index == npc.lastTemplateIndex then
+		index = index % #list + 1
+	end
+	npc.lastTemplateIndex = index
+	return list[index]
+end
+
+function npc.greetMessage(target)
+	local prefs = state.prefs
+	local display = target.DisplayName
+	if not display or display == "" then
+		display = target.Name
+	end
+	local nameText = prefs.greetName == "username" and target.Name or display
+	local text = npc.pickTemplate()
+	text = (text:gsub("{name}", function()
+		return nameText
+	end))
+	text = (text:gsub("{user}", function()
+		return target.Name
+	end))
+	text = (text:gsub("{display}", function()
+		return display
+	end))
+	local length = utf8.len(text)
+	if length and length > 180 then
+		text = text:sub(1, utf8.offset(text, 181) - 1)
+	end
+	return text
+end
+
+-- Status pesan TextChatService -> "spam" (Floodchecked: terlalu sering), "fail" (galat keras), atau nil (aman / belum final).
+function npc.statusKind(status)
+	local ok, name = pcall(function()
+		return status.Name
+	end)
+	if not ok or type(name) ~= "string" then
+		return nil
+	end
+	if name == "Floodchecked" then
+		return "spam", name
+	end
+	if name == "Unknown" or name == "TextFilterFailed" or name == "InvalidPrivacySettings"
+		or name == "InvalidTextChannelPermissions" or name == "MessageTooLong" or name == "ModerationTimeout" then
+		return "fail", name
+	end
+	return nil
+end
+
+-- Mengirim ke chat: TextChatService (chat baru) atau chat lama. Mengembalikan (berhasil, pesan galat, jenis: "spam" | "fail").
+function npc.sendChat(text)
+	local okService, textChat = pcall(game.GetService, game, "TextChatService")
+	if okService and textChat then
+		local okVersion, version = pcall(function()
+			return textChat.ChatVersion
+		end)
+		if okVersion and version == Enum.ChatVersion.TextChatService then
+			local channels = textChat:FindFirstChild("TextChannels")
+			local channel = channels and channels:FindFirstChild("RBXGeneral")
+			if not channel then
+				return false, "Channel RBXGeneral tidak ditemukan.", "fail"
+			end
+			local okSend, result = pcall(function()
+				return channel:SendAsync(text)
+			end)
+			if not okSend then
+				return false, tostring(result), "fail"
+			end
+			local okStatus, status = pcall(function()
+				return result.Status
+			end)
+			if okStatus and status then
+				local kind, name = npc.statusKind(status)
+				if kind == "spam" then
+					return false, "Floodchecked (terlalu sering mengirim pesan)", "spam"
+				elseif kind == "fail" then
+					return false, tostring(name), "fail"
+				end
+			end
+			return true, nil, nil
+		end
+	end
+	local events = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
+	local say = events and events:FindFirstChild("SayMessageRequest")
+	if say then
+		local okFire, errFire = pcall(function()
+			say:FireServer(text, "All")
+		end)
+		if okFire then
+			return true, nil, nil
+		end
+		return false, tostring(errFire), "fail"
+	end
+	return false, "Sistem chat tidak ditemukan (chat dimatikan game?).", "fail"
+end
+
+-- Gema pesan sendiri dari server: bila berisi "###" padahal teks kita tidak (disensor / ####), atau statusnya Floodchecked.
+function npc.onOwnMessage(text, status)
+	local pending = npc.chatPending
+	if not pending or os.clock() - pending.at > 20 then
+		return
+	end
+	-- Hanya gema dari pesan kita sendiri (disaring: tiap huruf diganti satu "#", jadi panjangnya sama); abaikan chat lain.
+	if type(text) ~= "string" or utf8.len(text) ~= utf8.len(pending.text) then
+		return
+	end
+	pending.echoed = true
+	if npc.statusKind(status) == "spam" then
+		pending.verdict = "spam"
+	elseif type(text) == "string" and text:find("###", 1, true) and not pending.text:find("###", 1, true) then
+		pending.verdict = "hashed"
+	end
+end
+
+function npc.watchChat()
+	spawnTask(function()
+		local okService, textChat = pcall(game.GetService, game, "TextChatService")
+		if okService and textChat then
+			local channels = textChat:WaitForChild("TextChannels", 10)
+			local channel = channels and channels:WaitForChild("RBXGeneral", 10)
+			if channel and not state.closed then
+				connect(channel.MessageReceived, function(message)
+					local okSource, userId = pcall(function()
+						return message.TextSource and message.TextSource.UserId
+					end)
+					if okSource and userId == player.UserId then
+						npc.onOwnMessage(message.Text, message.Status)
+					end
+				end)
+			end
+		end
+		-- Chat lama: pesan yang sudah disaring dikirim server lewat OnMessageDoneFiltering.
+		local events = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
+		local done = events and events:FindFirstChild("OnMessageDoneFiltering")
+		if done and done:IsA("RemoteEvent") and not state.closed then
+			connect(done.OnClientEvent, function(data)
+				if type(data) == "table" and (data.SpeakerUserId == player.UserId or data.FromSpeaker == player.Name) then
+					npc.onOwnMessage(data.Message, nil)
+				end
+			end)
+		end
+	end)
+end
+
+-- EMOTE SAPAAN (v13.1) ----------------------------------------------------------------------------------------------------
+-- Emote bawaan Roblox (wave, point, cheer, laugh, dance, dance2, dance3) dimainkan oleh skrip Animate milik karakter dan hanya
+-- jalan saat karakter BERDIRI (pose Standing). Emote avatar lain (mis. "Hello") harus terpasang di roda emote avatar
+-- (HumanoidDescription) dan butuh rig R15. Urutan percobaan: Humanoid:PlayEmote -> bindable PlayEmote milik Animate -> memutar
+-- animasinya langsung lewat Animator (tidak peduli pose / pembatasan game).
+npc.EMOTE_DEFAULT = { wave = true, point = true, cheer = true, laugh = true, dance = true, dance2 = true, dance3 = true }
+
+function npc.emoteName()
+	local custom = tostring(state.prefs.greetEmoteCustom or ""):match("^%s*(.-)%s*$")
+	if custom ~= "" then
+		return custom
+	end
+	return state.prefs.greetEmoteName
+end
+
+-- Emote yang terpasang di avatar: nama -> daftar asset id (kosong bila tidak terbaca).
+function npc.emoteList(humanoid)
+	local list = {}
+	local description = humanoid:FindFirstChildOfClass("HumanoidDescription")
+	if not description then
+		local ok, applied = pcall(function()
+			return humanoid:GetAppliedDescription()
+		end)
+		description = ok and applied or nil
+	end
+	if description then
+		local ok, emotes = pcall(function()
+			return description:GetEmotes()
+		end)
+		if ok and type(emotes) == "table" then
+			for name, ids in pairs(emotes) do
+				if type(name) == "string" then
+					list[name] = ids
+				end
+			end
+		end
+	end
+	return list
+end
+
+function npc.emoteDiagnostic(humanoid, wanted, available, exact)
+	local names = {}
+	for name in pairs(available) do
+		table.insert(names, name)
+	end
+	table.sort(names)
+	local character = humanoid.Parent
+	local parts = {
+		"rig " .. humanoid.RigType.Name,
+		"state " .. humanoid:GetState().Name,
+		(character and character:FindFirstChild("Animate")) and "skrip Animate ada" or "skrip Animate TIDAK ada",
+		exact and ("emote '" .. exact .. "' terpasang") or ("emote '" .. wanted .. "' tidak terpasang di avatar"),
+		#names > 0 and ("terpasang: " .. table.concat(names, ", ", 1, math.min(#names, 12))) or "tidak ada emote terpasang",
+	}
+	return table.concat(parts, " | ")
+end
+
+-- Daftar kandidat objek Animation untuk emote: (1) emote bawaan di dalam skrip Animate (Animate.wave dst.), (2) emote avatar dimuat
+-- dari asetnya lewat game:GetObjects milik executor, (3) Animation baru dengan id asetnya langsung.
+function npc.emoteAnimations(character, lower, exact, available)
+	local list = {}
+	local animate = character:FindFirstChild("Animate")
+	local folder = animate and animate:FindFirstChild(lower)
+	if folder then
+		local animation = folder:IsA("Animation") and folder or folder:FindFirstChildWhichIsA("Animation", true)
+		if animation then
+			table.insert(list, animation)
+		end
+	end
+	local ids = exact and available[exact]
+	local assetId = type(ids) == "table" and ids[1] or nil
+	if assetId then
+		local cached = npc.emoteCache[assetId]
+		if not cached then
+			cached = {}
+			local done, okLoad, objects = npc.callTimed(4, function()
+				return game:GetObjects("rbxassetid://" .. tostring(assetId))
+			end)
+			if done and okLoad and type(objects) == "table" then
+				for _, object in ipairs(objects) do
+					local animation = object:IsA("Animation") and object or object:FindFirstChildWhichIsA("Animation", true)
+					if animation then
+						table.insert(cached, animation)
+						break
+					end
+				end
+			end
+			local direct = Instance.new("Animation")
+			direct.AnimationId = "rbxassetid://" .. tostring(assetId)
+			table.insert(cached, direct)
+			npc.emoteCache[assetId] = cached
+		end
+		for _, animation in ipairs(cached) do
+			table.insert(list, animation)
+		end
+	end
+	return list
+end
+
+-- Memutar satu animasi lewat Animator dan memastikan benar-benar termuat (Length > 0); animasi yang gagal dimuat dibatalkan.
+function npc.playAnimation(humanoid, animation)
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		return false
+	end
+	local ok, track = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+	if not ok or not track then
+		return false
+	end
+	pcall(function()
+		track.Priority = Enum.AnimationPriority.Action
+		track.Looped = false
+		track:Play(0.15)
+	end)
+	local deadline = os.clock() + 1
+	while os.clock() < deadline and track.Length <= 0 do
+		task.wait(0.05)
+	end
+	if track.Length <= 0 then
+		pcall(function()
+			track:Stop(0)
+		end)
+		return false
+	end
+	npc.stopEmote()
+	npc.emoteTrack = track
+	task.delay(math.clamp(track.Length, 1.5, 5) + 0.3, function() -- jangan menggantung bila animasinya berulang
+		pcall(function()
+			track:Stop(0.2)
+		end)
+	end)
+	return true
+end
+
+function npc.stopEmote()
+	local track = npc.emoteTrack
+	npc.emoteTrack = nil
+	if track then
+		pcall(function()
+			track:Stop(0.2)
+		end)
+	end
+end
+
+-- Mengembalikan (berhasil, cara, alasan singkat, detail diagnosis).
+function npc.playEmote(humanoid, nameOverride)
+	if not humanoid or not humanoid.Parent then
+		return false, nil, "karakter tidak ada"
+	end
+	if humanoid.Sit or humanoid.SeatPart ~= nil then
+		return false, nil, "karakter sedang duduk"
+	end
+	local character = humanoid.Parent
+	local wanted = nameOverride or npc.emoteName()
+	local lower = wanted:lower()
+	local available = npc.emoteList(humanoid)
+	local exact = nil
+	for name in pairs(available) do
+		if name:lower() == lower then
+			exact = name
+			break
+		end
+	end
+	local isDefault = npc.EMOTE_DEFAULT[lower] == true
+
+	-- 1) Humanoid:PlayEmote: nama persis di deskripsi avatar (mis. "Hello"), lalu huruf kecil (emote bawaan).
+	local names = {}
+	if exact then
+		table.insert(names, exact)
+	end
+	if exact ~= lower then
+		table.insert(names, lower)
+	end
+	for attempt = 1, 2 do
+		for _, name in ipairs(names) do
+			local ok, played = pcall(function()
+				return humanoid:PlayEmote(name)
+			end)
+			if ok and played == true then
+				return true, "PlayEmote"
+			end
+		end
+		if attempt == 1 then
+			task.wait(0.35) -- pose Standing baru terbaca setelah karakter benar-benar berhenti
+		end
+	end
+
+	-- 2) Langsung ke bindable PlayEmote milik skrip Animate (emote bawaan).
+	if isDefault then
+		local animate = character:FindFirstChild("Animate")
+		local bindable = animate and animate:FindFirstChild("PlayEmote")
+		if bindable and bindable:IsA("BindableFunction") then
+			local done, ok, played = npc.callTimed(1, function()
+				return bindable:Invoke(lower)
+			end)
+			if done and ok and played == true then
+				return true, "Animate"
+			end
+		end
+	end
+
+	-- 3) Putar animasinya langsung lewat Animator (tidak peduli pose / pembatasan game).
+	for _, animation in ipairs(npc.emoteAnimations(character, lower, exact, available)) do
+		if npc.playAnimation(humanoid, animation) then
+			return true, "animasi langsung"
+		end
+	end
+
+	local reason
+	if not isDefault and not exact then
+		reason = string.format("emote '%s' tidak terpasang di avatar (pasang di roda emote, atau pakai Wave/Cheer/Point)", wanted)
+	elseif not isDefault and humanoid.RigType ~= Enum.HumanoidRigType.R15 then
+		reason = "emote avatar butuh rig R15 (karaktermu R6)"
+	elseif not isDefault then
+		reason = "game memblokir emote avatar, atau animasi emote tidak bisa dimuat (executor tanpa game:GetObjects?)"
+	else
+		reason = "emote ditolak game / karakter tidak berdiri / skrip Animate diganti game"
+	end
+	return false, nil, reason, npc.emoteDiagnostic(humanoid, wanted, available, exact)
+end
+
+-- Tombol "Tes emote": jalankan sekarang dan laporkan hasil + diagnosis di log.
+function npc.testEmote()
+	if npc.isGreeting() then
+		notify("Sedang menyapa pemain. Coba lagi sebentar.", "info")
+		return
+	end
+	npc.beginGreeting() -- jeda Mode NPC selama tes (langsung, sebelum ada yield)
+	spawnTask(function()
+		local _, humanoid, root = waitForCharacter(5)
+		if not humanoid or not root then
+			npc.endGreeting()
+			notify("Karakter belum siap untuk tes emote.", "warning")
+			return
+		end
+		local okRun, err = pcall(function()
+			npc.holdStill(humanoid, root)
+			local wanted = npc.emoteName()
+			local ok, method, reason, detail = npc.playEmote(humanoid)
+			if ok then
+				notify(string.format("Emote '%s' berhasil (%s).", wanted, method), "success")
+				if ui.addLog then
+					ui.addLog(string.format("Tes emote '%s' berhasil via %s.", wanted, method), "success", "NPC")
+				end
+			else
+				notify("Emote '" .. wanted .. "' gagal: " .. tostring(reason), "warning")
+				if ui.addLog then
+					ui.addLog("Tes emote gagal: " .. tostring(reason) .. (detail and (" [" .. detail .. "]") or ""), "warning", "NPC")
+				end
+			end
+			task.wait(3.5)
+			npc.stopEmote()
+		end)
+		npc.endGreeting()
+		if not okRun then
+			warn("[AutonomousSystem] Tes emote error: " .. tostring(err))
+		end
+	end)
+end
+
+-- MENGHADAP PEMAIN (v13.1) -------------------------------------------------------------------------------------------------
+-- Saat menyapa: karakter berhenti (jalan NPC dibatalkan), lalu TERUS menoleh ke pemain yang disapa tiap frame sampai pesan
+-- terkirim. Setelah itu menoleh ke pemain antre berikutnya, atau kembali ke arah semula (arah Return bila sedang di pos awal NPC).
+
+-- Berhenti dan tunggu sampai benar-benar berdiri (emote bawaan hanya jalan saat pose Standing). Mengembalikan false bila
+-- karakter tidak boleh ditahan (perjalanan lain sedang berjalan, atau pemain sedang menggerakkan karakter sendiri).
+function npc.holdStill(humanoid, root)
+	if npc.walking and state.busy then
+		npc.walkCancelled = true
+		state.moveToken += 1 -- batalkan perjalanan NPC (diam, tanpa toast)
+		local deadline = os.clock() + 2
+		while state.busy and os.clock() < deadline and not state.closed do
+			task.wait(0.05)
+		end
+	end
+	if state.closed or not humanoid.Parent or not root.Parent then
+		return false
+	end
+	if humanoid.SeatPart ~= nil or humanoid.Sit then
+		return false -- duduk: jangan memutar kursi / kendaraan
+	end
+	if state.busy then
+		return true -- perjalanan lain (Return / Find / Patrol) masih berjalan: jangan ditahan, penoleh menunggu sampai selesai
+	end
+	if not npc.active and humanoid.MoveDirection.Magnitude > 0.1 then
+		return false -- pemain sedang menggerakkan karakter sendiri
+	end
+	humanoid:Move(Vector3.zero)
+	humanoid:MoveTo(root.Position)
+	local deadline = os.clock() + 1.2
+	while os.clock() < deadline and root.Parent and not state.closed do
+		local velocity = root.AssemblyLinearVelocity
+		if Vector3.new(velocity.X, 0, velocity.Z).Magnitude < 1 and humanoid.MoveDirection.Magnitude < 0.1 then
+			break
+		end
+		task.wait(0.05)
+	end
+	return true
+end
+
+-- Satu langkah menoleh ke pemain (halus, maks. ~400 derajat per detik).
+function npc.faceStep(target, root, dt)
+	local otherRoot = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+	if not otherRoot or not root.Parent then
+		return
+	end
+	local toTarget = flatten(otherRoot.Position - root.Position)
+	if toTarget.Magnitude < 0.5 then
+		return
+	end
+	local look = flatten(root.CFrame.LookVector)
+	if look.Magnitude < 0.01 then
+		look = toTarget
+	end
+	local desired = math.atan2(-toTarget.X, -toTarget.Z)
+	local current = math.atan2(-look.X, -look.Z)
+	local delta = (desired - current + math.pi) % (2 * math.pi) - math.pi
+	local yaw = current + math.clamp(delta, -7 * dt, 7 * dt)
+	root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
+end
+
+-- Menunggu duration detik sambil terus menoleh ke target. Mengembalikan false bila pemain menggerakkan karakter sendiri
+-- (lalu penoleh dihentikan supaya tidak melawan input pemain).
+function npc.waitFacing(duration, target, root, humanoid, tracking)
+	local untilTime = os.clock() + duration
+	while os.clock() < untilTime and not state.closed do
+		local dt = RunService.Heartbeat:Wait()
+		if tracking and root.Parent and not state.busy then -- selama ada perjalanan lain: tunggu, jangan melawan
+			if humanoid.Parent and (humanoid.MoveDirection.Magnitude > 0.1 or humanoid.SeatPart ~= nil) then
+				tracking = false -- pemain menggerakkan karakter sendiri / duduk: hentikan penoleh
+			else
+				npc.faceStep(target, root, dt)
+			end
+		end
+	end
+	return tracking
+end
+
+function npc.turnToPosition(root, position, duration)
+	if not root.Parent then
+		return
+	end
+	local flat = Vector3.new(position.X, root.Position.Y, position.Z)
+	if (flat - root.Position).Magnitude < 0.5 then
+		return
+	end
+	tween(root, duration or 0.4, { CFrame = CFrame.lookAt(root.Position, flat) }, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+end
+
+-- Setelah pesan terkirim: menoleh ke pemain antre berikutnya, atau kembali ke arah semula / arah Return.
+function npc.faceSettle(root, humanoid)
+	if not state.prefs.greetFace or not root or not root.Parent or state.busy then
+		npc.preGreetLook = nil -- mati / perjalanan lain sedang berjalan: jangan menoleh sendiri
+		return
+	end
+	if humanoid and humanoid.Parent and humanoid.MoveDirection.Magnitude > 0.1 then
+		npc.preGreetLook = nil -- pemain sedang menggerakkan karakter sendiri
+		return
+	end
+	local nextTarget = npc.queue[1]
+	local nextRoot = nextTarget and nextTarget.Parent == Players and nextTarget.Character
+		and nextTarget.Character:FindFirstChild("HumanoidRootPart")
+	if nextRoot then
+		npc.turnToPosition(root, nextRoot.Position, 0.4)
+		return
+	end
+	local look = npc.preGreetLook
+	npc.preGreetLook = nil
+	local ref = npc.homeRef
+	if npc.active and ref and flatten(root.Position - ref.cf.Position).Magnitude <= 8 then
+		look = flatten(ref.cf.LookVector)
+	end
+	if look and look.Magnitude > 0.01 then
+		tween(root, 0.5, { CFrame = CFrame.lookAt(root.Position, root.Position + look.Unit) }, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+	end
+end
+
+function npc.markGreeted(target, announce)
+	if not npc.greeted[target.UserId] then
+		npc.greeted[target.UserId] = true
+		npc.greetedCount += 1
+	end
+	npc.retries[target.UserId] = nil
+	if announce then
+		npc.lastName = target.DisplayName ~= "" and target.DisplayName or target.Name
+	end
+end
+
+function npc.requeue(target)
+	if not npc.queued[target.UserId] then
+		npc.queued[target.UserId] = true
+		table.insert(npc.queue, 1, target)
+	end
+end
+
+function npc.greetSequence(target, humanoid, root)
+	local prefs = state.prefs
+	local text = npc.greetMessage(target)
+
+	-- Berhenti dulu (batalkan jalan NPC) lalu ingat arah semula; hanya bila tidak ada perjalanan lain (mis. Return manual).
+	local tracking = false
+	if prefs.greetFace or prefs.greetEmote then
+		local held = npc.holdStill(humanoid, root)
+		tracking = prefs.greetFace and held
+		if tracking and not npc.preGreetLook then
+			npc.preGreetLook = flatten(root.CFrame.LookVector)
+		end
+	end
+
+	-- Menoleh ke pemain dulu, baru emote.
+	if prefs.greetEmote and not state.busy then
+		tracking = npc.waitFacing(0.4, target, root, humanoid, tracking)
+		local okEmote, _, reason, detail = npc.playEmote(humanoid)
+		local usedWave = false
+		if not okEmote and npc.emoteName():lower() ~= "wave" then
+			usedWave = npc.playEmote(humanoid, "wave") -- cadangan: emote bawaan Roblox
+		end
+		if not okEmote and os.clock() - npc.emoteWarnAt > 60 then
+			npc.emoteWarnAt = os.clock()
+			if ui.addLog then
+				ui.addLog("Emote sapaan gagal: " .. tostring(reason) .. (usedWave and " (Wave dipakai sebagai cadangan)" or "")
+					.. (detail and (" [" .. detail .. "]") or ""), "warning", "NPC")
+			end
+		end
+	end
+
+	-- Meniru mengetik: terus menoleh selama jeda sebelum pesan terkirim.
+	tracking = npc.waitFacing(math.clamp(#text * 0.05, 0.8, 3) + math.random() * 0.8, target, root, humanoid, tracking)
+	if state.closed or not prefs.greetOn or target.Parent ~= Players or npc.greeted[target.UserId] then
+		return
+	end
+
+	npc.chatPending = { text = text, at = os.clock(), echoed = false, verdict = nil }
+	local pending = npc.chatPending
+	local ok, err, kind = npc.sendChat(text)
+	npc.lastSent = os.clock()
+
+	local verdict = nil -- nil = berhasil
+	if ok then
+		-- Beri waktu singkat untuk gema pesan dari server (hasil saringan "####" / flood check); tetap menoleh ke pemain.
+		local waitUntil = os.clock() + 1.5
+		while not pending.verdict and not pending.echoed and os.clock() < waitUntil and not state.closed do
+			tracking = npc.waitFacing(0.1, target, root, humanoid, tracking)
+		end
+		verdict = pending.verdict
+	else
+		verdict = kind or "fail"
+	end
+	npc.chatPending = nil
+
+	local userId = target.UserId
+	if verdict == nil then
+		npc.failStreak = 0
+		npc.markGreeted(target, true)
+		npc.scheduleHome() -- baru menyapa: hitung ulang waktu kembali ke pos
+		if ui.addLog then
+			ui.addLog("Sapa: " .. text, "info", "NPC")
+		end
+	elseif verdict == "spam" or verdict == "hashed" then
+		-- Terdeteksi spam / pesan jadi ####: jeda (bawaan 20 dtk), lalu kembali ke jeda slider "Jeda antar sapaan".
+		npc.failStreak = 0
+		local tries = (npc.retries[userId] or 0) + 1
+		npc.retries[userId] = tries
+		local pause = prefs.greetSpamPause
+		npc.pausedUntil = os.clock() + pause
+		npc.pauseReason = verdict == "spam" and "terdeteksi spam" or "pesan disensor ####"
+		if tries >= (verdict == "spam" and 3 or 2) then
+			npc.markGreeted(target, false) -- menyerah agar tidak berulang tanpa henti
+		else
+			npc.requeue(target) -- coba sapa lagi setelah jeda
+		end
+		notify(string.format("Sapaan %s. Jeda %d dtk, lalu kembali ke jeda %d dtk antar sapaan.", npc.pauseReason, pause, prefs.greetGap), "warning")
+		if ui.addLog then
+			ui.addLog("Sapaan " .. npc.pauseReason .. " (" .. text .. "). Jeda " .. pause .. " dtk.", "warning", "NPC")
+		end
+	else
+		npc.failStreak += 1
+		if ui.addLog then
+			ui.addLog("Sapa gagal: " .. tostring(err), "warning", "NPC")
+		end
+		if npc.failStreak >= 3 then
+			npc.failStreak = 0
+			npc.pausedUntil = os.clock() + 120
+			npc.pauseReason = "chat gagal 3x"
+			notify("Sapa gagal 3 kali berturut-turut (chat dimatikan/dibatasi?). Sapa dijeda 2 menit.", "warning")
+		end
+	end
+	npc.refresh()
+end
+
+-- Pembungkus: NPC berhenti selama menyapa (npc.isGreeting), lalu menoleh ke pemain berikutnya / arah semula setelah selesai.
+function npc.sendGreeting(target, humanoid, root)
+	npc.beginGreeting()
+	local ok, err = pcall(npc.greetSequence, target, humanoid, root)
+	pcall(npc.faceSettle, root, humanoid)
+	if state.prefs.greetFace and not state.closed then
+		task.wait(0.5) -- biarkan tween menoleh selesai sebelum Mode NPC bergerak lagi
+	end
+	npc.endGreeting()
+	if not ok then
+		error(err, 0)
+	end
+end
+
+function npc.resetGreeted()
+	table.clear(npc.greeted)
+	npc.greetedCount = 0
+	npc.lastName = nil
+	table.clear(npc.nearSince)
+	table.clear(npc.queue)
+	table.clear(npc.queued)
+	table.clear(npc.retries)
+	notify("Daftar sapa direset: semua pemain bisa disapa lagi.", "info")
+	npc.refresh()
+end
+
+-- Daftar abaikan: username / display name (pisah koma atau spasi) + opsional semua teman Roblox.
+function npc.ignoredSet()
+	local set = {}
+	for part in tostring(state.prefs.greetIgnore):gmatch("[^,;]+") do
+		local trimmed = part:match("^%s*(.-)%s*$")
+		if trimmed ~= "" then
+			set[trimmed:lower()] = true
+		end
+	end
+	return set
+end
+
+function npc.isIgnored(target, ignored)
+	if ignored[target.Name:lower()] or ignored[(target.DisplayName or ""):lower()] then
+		return true
+	end
+	if state.prefs.greetSkipFriends then
+		local now = os.clock()
+		local cached = npc.friendCache[target.UserId]
+		if not cached or now > cached.expires then
+			local ok, result = pcall(player.IsFriendsWith, player, target.UserId)
+			-- Hasil sukses disimpan lama; kegagalan (jaringan) hanya 30 dtk lalu dicoba lagi.
+			cached = { value = ok and result == true, expires = now + (ok and 600 or 30) }
+			npc.friendCache[target.UserId] = cached
+		end
+		return cached.value
+	end
+	return false
+end
+
+function npc.greetLoop()
+	local lastRefresh = 0
+	while not state.closed do
+		task.wait(0.5)
+		if state.closed then
+			return
+		end
+		local prefs = state.prefs
+		local now = os.clock()
+		if now - lastRefresh >= 2 then
+			lastRefresh = now
+			npc.refresh()
+		end
+		if not (prefs.greetOn and serverAllowed()) then
+			table.clear(npc.nearSince)
+			table.clear(npc.queue)
+			table.clear(npc.queued)
+			npc.preGreetLook = nil
+			continue
+		end
+		-- Sedang dijeda (spam / chat gagal): antrean dipertahankan, lanjut otomatis setelah jeda.
+		if now < npc.pausedUntil then
+			continue
+		end
+		local _, humanoid, root = getCharacterParts()
+		if not root or not root.Parent or not humanoid or humanoid.Health <= 0 then
+			continue
+		end
+		local range = prefs.greetDistance
+		local ignored = npc.ignoredSet()
+		for _, other in ipairs(Players:GetPlayers()) do
+			if other ~= player and not npc.greeted[other.UserId] and not npc.queued[other.UserId] then
+				local otherRoot = other.Character and other.Character:FindFirstChild("HumanoidRootPart")
+				-- Cek jarak dulu; daftar abaikan / cek teman (bisa memanggil web) hanya untuk pemain yang memang dekat.
+				if otherRoot and (otherRoot.Position - root.Position).Magnitude <= range and not npc.isIgnored(other, ignored) then
+					local since = npc.nearSince[other.UserId]
+					if not since then
+						npc.nearSince[other.UserId] = now
+					elseif now - since >= prefs.greetStay then
+						npc.queued[other.UserId] = true
+						table.insert(npc.queue, other)
+					end
+				else
+					npc.nearSince[other.UserId] = nil
+				end
+			end
+		end
+		-- Satu sapaan per putaran, hanya bila jeda antar sapaan sudah cukup.
+		if #npc.queue > 0 and now - npc.lastSent >= prefs.greetGap then
+			local target = table.remove(npc.queue, 1)
+			npc.queued[target.UserId] = nil
+			local targetRoot = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+			if target.Parent == Players and not npc.greeted[target.UserId] and targetRoot
+				and (targetRoot.Position - root.Position).Magnitude <= range * 1.5 then
+				local okGreet, greetError = pcall(npc.sendGreeting, target, humanoid, root)
+				if not okGreet then
+					npc.chatPending = nil
+					npc.lastSent = os.clock()
+					npc.markGreeted(target, false) -- jangan diulang terus bila galat berulang
+					warn("[AutonomousSystem] Sapa error: " .. tostring(greetError))
+					if ui.addLog then
+						ui.addLog("Sapa error: " .. tostring(greetError), "error", "NPC")
+					end
+				end
+			else
+				npc.nearSince[target.UserId] = nil
+			end
+		end
+		-- Antrean kosong tetapi karakter masih menghadap pemain terakhir (mis. dia pergi): kembali ke arah semula.
+		if npc.preGreetLook and #npc.queue == 0 and not npc.isGreeting() then
+			pcall(npc.faceSettle, root, humanoid)
+		end
+	end
+end
+
+-- VISUAL JARAK (cincin + label stud + jarak tiap pemain) --------------------------------------------------------------------
+-- Dibuat lokal di Camera (tidak terlihat pemain lain) dan memakai Part CanQuery=false supaya tidak mengganggu raycast/rute.
+function npc.vizFolder()
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return nil
+	end
+	local viz = npc.viz
+	if viz.folder and viz.folder.Parent == camera then
+		return viz.folder
+	end
+	if viz.folder then
+		viz.folder:Destroy()
+	end
+	viz.rings = {}
+	viz.folder = new("Folder", { Name = "AutonomousViz", Parent = camera })
+	return viz.folder
+end
+
+function npc.vizClear()
+	local viz = npc.viz
+	if viz.folder then
+		viz.folder:Destroy()
+		viz.folder = nil
+	end
+	viz.rings = {}
+	for userId, tag in pairs(viz.tags) do
+		viz.tags[userId] = nil
+		if tag.gui then
+			tag.gui:Destroy()
+		end
+	end
+end
+
+-- Membuat / membangun ulang cincin bila radius atau warna berubah. Mengembalikan data cincin.
+function npc.vizRing(key, radius, color)
+	local folder = npc.vizFolder()
+	if not folder then
+		return nil
+	end
+	local viz = npc.viz
+	local ring = viz.rings[key]
+	if ring and (ring.radius ~= radius or ring.color ~= color or not ring.model.Parent) then
+		ring.model:Destroy()
+		ring.labelPart:Destroy()
+		ring = nil
+	end
+	if ring then
+		return ring
+	end
+	local segments = math.clamp(math.floor(radius * 1.2), 28, 90)
+	local model = new("Model", { Name = "Ring_" .. key })
+	local anchor = new("Part", {
+		Name = "Anchor", Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, Transparency = 1,
+		Size = Vector3.new(0.2, 0.2, 0.2), CFrame = CFrame.new(0, 0, 0), Parent = model,
+	})
+	model.PrimaryPart = anchor
+	local length = 2 * radius * math.sin(math.pi / segments) * 1.05
+	for index = 1, segments do
+		local angle = (index - 0.5) / segments * math.pi * 2
+		local position = Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+		local tangent = Vector3.new(-math.sin(angle), 0, math.cos(angle))
+		new("Part", {
+			Name = "Seg", Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false,
+			Material = Enum.Material.Neon, Color = color, Transparency = 0.3, Size = Vector3.new(0.4, 0.12, length),
+			CFrame = CFrame.lookAt(position, position + tangent), Parent = model,
+		})
+	end
+	model.Parent = folder
+	local labelPart = new("Part", {
+		Name = "Label_" .. key, Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, Transparency = 1,
+		Size = Vector3.new(0.2, 0.2, 0.2), Parent = folder,
+	})
+	local label = new("TextLabel", {
+		Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.35,
+		Text = "", Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = color,
+	}, { corner(6) })
+	new("BillboardGui", {
+		Name = "Tag", Adornee = labelPart, AlwaysOnTop = true, Size = UDim2.fromOffset(150, 20),
+		StudsOffset = Vector3.new(0, 1.2, 0), LightInfluence = 0, ResetOnSpawn = false, Parent = labelPart,
+	}, { label })
+	ring = { model = model, labelPart = labelPart, label = label, radius = radius, color = color }
+	viz.rings[key] = ring
+	return ring
+end
+
+function npc.vizDrop(key)
+	local ring = npc.viz.rings[key]
+	if ring then
+		npc.viz.rings[key] = nil
+		ring.model:Destroy()
+		ring.labelPart:Destroy()
+	end
+end
+
+-- Dipanggil tiap frame: gerakkan cincin (murah); bagian berat (raycast tanah, label, tag pemain) tiap 0.12 dtk.
+function npc.vizStep()
+	local viz = npc.viz
+	local prefs = state.prefs
+	if state.closed then
+		return
+	end
+	local wantGreet = prefs.greetOn
+	local wantWander = npc.active and prefs.npcMode == "wander"
+	if not prefs.npcShowRange or not (wantGreet or npc.active) then
+		if viz.folder or next(viz.tags) then
+			npc.vizClear()
+		end
+		return
+	end
+	local character, _, root = getCharacterParts()
+	if not character or not root or not root.Parent then
+		return
+	end
+
+	local now = os.clock()
+	local slow = now >= viz.nextSlow
+	if slow then
+		viz.nextSlow = now + 0.12
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = viz.folder and { character, viz.folder } or { character }
+		local hit = Workspace:Raycast(root.Position, Vector3.new(0, -25, 0), params)
+		viz.groundY = hit and (hit.Position.Y + 0.15) or (root.Position.Y - 2.8)
+		if wantWander and npc.center and now - viz.wanderAt >= 1 then
+			viz.wanderAt = now
+			local centerHit = Workspace:Raycast(npc.center + Vector3.new(0, 2, 0), Vector3.new(0, -25, 0), params)
+			viz.wanderY = centerHit and (centerHit.Position.Y + 0.15) or (npc.center.Y - 2.8)
+		end
+	end
+	local groundY = viz.groundY or (root.Position.Y - 2.8)
+
+	local camera = Workspace.CurrentCamera
+	local cameraPos = camera and camera.CFrame.Position or root.Position + Vector3.new(1, 0, 0)
+
+	-- Cincin jarak sapa (ikut karakter).
+	if wantGreet then
+		local ring = npc.vizRing("greet", prefs.greetDistance, Color3.fromRGB(80, 220, 160))
+		if ring then
+			local center = Vector3.new(root.Position.X, groundY, root.Position.Z)
+			ring.model:PivotTo(CFrame.new(center))
+			if slow then
+				local flat = Vector3.new(cameraPos.X - center.X, 0, cameraPos.Z - center.Z)
+				local dir = flat.Magnitude > 0.1 and flat.Unit or Vector3.new(1, 0, 0)
+				ring.labelPart.CFrame = CFrame.new(center + dir * prefs.greetDistance)
+				ring.label.Text = string.format("Sapa • %d stud", prefs.greetDistance)
+			end
+		end
+	else
+		npc.vizDrop("greet")
+	end
+
+	-- Cincin radius berkeliling (tetap di pusat NPC).
+	if wantWander and npc.center then
+		local ring = npc.vizRing("wander", prefs.npcRadius, Color3.fromRGB(255, 190, 70))
+		if ring then
+			local center = Vector3.new(npc.center.X, viz.wanderY or (npc.center.Y - 2.8), npc.center.Z)
+			ring.model:PivotTo(CFrame.new(center))
+			if slow then
+				local flat = Vector3.new(cameraPos.X - center.X, 0, cameraPos.Z - center.Z)
+				local dir = flat.Magnitude > 0.1 and flat.Unit or Vector3.new(1, 0, 0)
+				ring.labelPart.CFrame = CFrame.new(center + dir * prefs.npcRadius)
+				ring.label.Text = string.format("Radius NPC • %d stud", prefs.npcRadius)
+			end
+		end
+	else
+		npc.vizDrop("wander")
+	end
+
+	if not wantGreet and next(viz.tags) then
+		for userId, tag in pairs(viz.tags) do
+			viz.tags[userId] = nil
+			tag.gui:Destroy()
+		end
+	end
+
+	-- Label jarak tiap pemain di sekitar (hijau = dalam jarak sapa, biru = sudah disapa, abu = di luar jarak).
+	if slow and wantGreet then
+		local gui = ensureEspGui() and esp.gui or nil
+		local seen = {}
+		local reach = math.max(prefs.greetDistance * 2, 60)
+		if gui then
+			for _, other in ipairs(Players:GetPlayers()) do
+				local otherRoot = other ~= player and other.Character and other.Character:FindFirstChild("HumanoidRootPart")
+				if otherRoot then
+					local dist = (otherRoot.Position - root.Position).Magnitude
+					if dist <= reach then
+						seen[other.UserId] = true
+						local tag = viz.tags[other.UserId]
+						if not tag or not tag.gui.Parent or tag.root ~= otherRoot then
+							if tag and tag.gui then
+								tag.gui:Destroy()
+							end
+							local label = new("TextLabel", {
+								Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.45,
+								Text = "", Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = Color3.new(1, 1, 1),
+							}, { corner(5) })
+							local board = new("BillboardGui", {
+								Name = "DistTag", Adornee = otherRoot, AlwaysOnTop = true, Size = UDim2.fromOffset(104, 17),
+								StudsOffset = Vector3.new(0, 3.4, 0), LightInfluence = 0, ResetOnSpawn = false, Parent = gui,
+							}, { label })
+							tag = { gui = board, label = label, root = otherRoot }
+							viz.tags[other.UserId] = tag
+						end
+						local greeted = npc.greeted[other.UserId]
+						tag.label.Text = string.format("%.0f stud%s", dist, greeted and " ✓" or "")
+						tag.label.TextColor3 = greeted and Color3.fromRGB(120, 180, 255)
+							or (dist <= prefs.greetDistance and Color3.fromRGB(110, 255, 150) or Color3.fromRGB(190, 190, 190))
+					end
+				end
+			end
+		end
+		for userId, tag in pairs(viz.tags) do
+			if not seen[userId] then
+				viz.tags[userId] = nil
+				tag.gui:Destroy()
+			end
+		end
+	end
+end
+
+table.insert(cleanupHooks, function()
+	npc.vizClear()
+end)
+
+function npc.startModule()
+	npc.greetInit()
+	connect(Players.PlayerRemoving, function(leaving)
+		if npc.greeted[leaving.UserId] then
+			npc.greeted[leaving.UserId] = nil -- keluar lalu masuk lagi = boleh disapa lagi
+			npc.greetedCount = math.max(0, npc.greetedCount - 1)
+		end
+		npc.nearSince[leaving.UserId] = nil
+		npc.queued[leaving.UserId] = nil
+		npc.retries[leaving.UserId] = nil
+		npc.friendCache[leaving.UserId] = nil
+		for index = #npc.queue, 1, -1 do
+			if npc.queue[index] == leaving then
+				table.remove(npc.queue, index)
+			end
+		end
+		npc.refresh()
+	end)
+	-- Auto-save: simpan seketika saat teleport/rejoin dimulai (selain simpan berkala dan tiap perubahan).
+	connect(player.OnTeleport, function()
+		persistSavedData()
+	end)
+	npc.watchChat()
+	connect(RunService.RenderStepped, function()
+		npc.vizStep()
+	end)
+	spawnTask(npc.greetLoop)
+	if state.prefs.npcRunning and state.prefs.npcResume then
+		table.insert(pendingNotices, { "Mode NPC dilanjutkan otomatis (pengaturan dipulihkan).", "success" })
+		spawnTask(function()
+			task.wait(3)
+			if not state.closed and not npc.active then
+				npc.start(true)
+			end
+		end)
+	end
+	npc.refresh()
+end
+
+-- AKSI TERJADWAL ---------------------------------------------------------------------------------------------------------------
+startAutomationHook = function()
+	npc.startModule()
+	spawnTask(function()
+		local nextAt = os.clock() + state.prefs.schedSeconds
+		while not state.closed do
+			task.wait(1)
+			local prefs = state.prefs
+			if not prefs.schedOn then
+				nextAt = os.clock() + prefs.schedSeconds
+			elseif os.clock() >= nextAt then
+				nextAt = os.clock() + prefs.schedSeconds
+				if serverAllowed() and not state.busy and not deliver.running then
+					local acted = interactWith(prefs.schedKey, prefs.schedPrompt)
+					ui.addLog(acted and "Aksi terjadwal dijalankan." or "Aksi terjadwal: tidak ada tombol/prompt yang cocok.", "info", "Jadwal")
+				end
+			end
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- CLEANUP
+--------------------------------------------------------------------------------
+
+cleanup = function()
+	if state.closed then
+		return
+	end
+	-- Ditutup oleh pengguna / dijalankan ulang: Mode NPC tidak boleh otomatis lanjut di eksekusi berikutnya.
+	state.prefs.npcRunning = false
+	-- Simpan dulu selagi state masih utuh, lalu tandai closed.
+	persistSavedData()
+	state.closed = true
+	state.find.token += 1
+	state.find.running = false
+	state.find.scanning = false
+	state.find.espEnabled = false
+	state.afk.active = false
+	state.afk.token += 1
+	state.moveToken += 1
+	state.busy = false
+	restoreWalkSpeed()
+
+	for _, hook in ipairs(cleanupHooks) do
+		pcall(hook)
+	end
+
+	for _, connection in ipairs(connections) do
+		connection:Disconnect()
+	end
+	table.clear(connections)
+
+	for activeTween in pairs(activeTweens) do
+		activeTween:Cancel()
+	end
+	table.clear(activeTweens)
+
+	local current = coroutine.running()
+	for _, thread in ipairs(tasks) do
+		if thread ~= current and coroutine.status(thread) == "suspended" then
+			pcall(task.cancel, thread)
+		end
+	end
+	table.clear(tasks)
+	table.clear(toastQueue)
+	table.clear(toastMessages)
+
+	esp.token += 1
+	if esp.gui then
+		esp.gui:Destroy()
+		esp.gui = nil
+	end
+	table.clear(esp.items)
+	if ui.gui then
+		ui.gui:Destroy()
+	end
+
+	local registered = globalEnv[INSTANCE_KEY]
+	if type(registered) == "table" and registered.Id == state then
+		globalEnv[INSTANCE_KEY] = nil
+	end
+end
+
+--------------------------------------------------------------------------------
+-- INIT
+--------------------------------------------------------------------------------
+
+detectStorage()
+loadSavedData()
+-- State dari queue payload punya prioritas saat executor tidak menyediakan penyimpanan file.
+if globalEnv.__IsekaiReturnSystemAutoExecuteManaged == true then
+	state.advanced.autoExecuteEnabled = globalEnv.__IsekaiReturnSystemAutoExecuteEnabled == true
+	if type(globalEnv.__IsekaiReturnSystemAutoExecuteURL) == "string" then
+		state.advanced.scriptUrl = globalEnv.__IsekaiReturnSystemAutoExecuteURL
+	end
+end
+local resumeFindAfterTeleport = globalEnv.__IsekaiReturnSystemResumeFindAfterTeleport == true
+globalEnv.__IsekaiReturnSystemResumeFindAfterTeleport = false
+
+pcall(applyThemePreset)
+local okBuild, buildError = pcall(buildUI)
+if not okBuild then
+	warn(CONFIG.ConsoleTag .. " [ERROR] [Startup] Gagal membangun UI: " .. tostring(buildError))
+	pcall(cleanup)
+	return
+end
+
+connect(player.CharacterRemoving, function()
+	antiStuckGeneration += 1
+	onCharacterRemoving()
+end)
+connect(player.CharacterAdded, function(character)
+	startAntiStuckMonitor(character)
+	state.advanced.startFootstepAssist(character)
+end)
+if player.Character then
+	startAntiStuckMonitor(player.Character)
+	state.advanced.startFootstepAssist(player.Character)
+end
+connect(TeleportService.TeleportInitFailed, function(failingPlayer, teleportResult, errorMessage)
+	if failingPlayer ~= player then return end
+	rejoinRequested = false
+	state.rejoin.manualActive = false
+	state.rejoin.manualEndsAt = 0
+	state.rejoin.manualToken += 1
+	local message = "Teleport/rejoin gagal: " .. tostring(errorMessage or teleportResult or "alasan tidak tersedia")
+	if ui.addLog then ui.addLog(message, "error", "TeleportService") end
+	setStatus(message, "error")
+	if showNotification then showNotification(message, "error") end
+	if ui.refreshRejoin then ui.refreshRejoin() end
+	if state.hooks.teleportFailed then
+		state.hooks.teleportFailed(teleportResult, errorMessage)
+	end
+end)
+connect(UserInputService.InputBegan, onInputBegan)
+connect(player.Idled, onIdled)
+
+globalEnv[INSTANCE_KEY] = { Cleanup = cleanup, Id = state }
+
+if state.advanced.autoExecuteEnabled then
+	local queued, message = queueAutoExecute()
+	table.insert(pendingNotices, { message, queued and "success" or "warning" })
+end
+
+-- Pulihkan Anti-AFK bila aktif saat terakhir disimpan.
+if state.afk.resume then
+	state.afk.resume = false
+	startAntiAFK(state.afk.minutes)
+	table.insert(pendingNotices, {
+		string.format("Anti-AFK dipulihkan: menekan %s tiap %d menit.", state.afk.keyCode.Name, state.afk.minutes),
+		"success",
+	})
+end
+
+if state.autoReturn and getSelectedSlot() then
+	table.insert(pendingNotices, {
+		string.format("Auto Return aktif (jarak deteksi %.1f stud).", state.autoTrigger),
+		"info",
+	})
+end
+
+-- Pulihkan Timer Rejoin (v13): dihitung ulang dari awal setiap rejoin dan berulang sampai Stop Timer ditekan. Pengawas ini juga
+-- menyalakan ulang timer bila rejoin gagal / tidak jadi pindah (rejoinRequested kembali false).
+if state.rejoin.manualRepeat then
+	table.insert(pendingNotices, {
+		string.format("Timer rejoin dipulihkan: menghitung ulang %d menit (berulang sampai Stop Timer).", state.rejoin.manualMinutes),
+		"success",
+	})
+end
+spawnTask(function()
+	task.wait(CONFIG.IntroDuration + 1)
+	while not state.closed do
+		if state.rejoin.manualRepeat and not state.rejoin.manualActive and not rejoinRequested then
+			state.rejoin.startTimer(true)
+		end
+		task.wait(5)
+	end
+end)
+
+-- Tulis file segera agar semua pengaturan (termasuk default) sudah ada di disk,
+-- lalu simpan ulang berkala bila ada perubahan (nilai slider, dsb.).
+persistSavedData()
+spawnTask(function()
+	while not state.closed do
+		task.wait(CONFIG.AutoSaveInterval)
+		if state.closed then
+			return
+		end
+		persistSavedData()
+	end
+end)
+
+spawnTask(runAutoReturnWatcher)
+startServerModule()
+if startToolsHook then
+	startToolsHook()
+end
+if startAutomationHook then
+	startAutomationHook()
+end
+
+refreshUI()
+setStatus(state.storage.available and "Siap. Data tersimpan dimuat otomatis." or "Siap. Mode sesi (tanpa penyimpanan file).", state.storage.available and "info" or "warning")
+if ui.addLog then
+	ui.addLog("Isekai Autonomous System v13.1 dimulai. Storage: " .. state.storage.mode .. ".", "success", "Startup")
+	ui.addLog("Modul aktif: Return/Auto Return, Find/ESP, Anti-AFK, Anti-Stuck, Anti-Sit, Gerak Natural, Auto Rejoin/Reconnect/Hop, Server, Tools, Patrol/Setor, Mode NPC/Sapa pemain, serta Autoexecute. Log/error dicetak ke console executor.", "info", "Startup")
+end
+if resumeFindAfterTeleport then
+	table.insert(pendingNotices, { "Find akan dilanjutkan setelah UI siap karena script rejoin otomatis.", "success" })
+end
+local okIntro, introError = pcall(playIntro)
+if not okIntro then
+	warn(CONFIG.ConsoleTag .. " [ERROR] [Startup] Intro gagal, UI langsung ditampilkan: " .. tostring(introError))
+	local okShow, showError = pcall(showMainPanel)
+	if not okShow then
+		warn(CONFIG.ConsoleTag .. " [ERROR] [Startup] UI gagal ditampilkan: " .. tostring(showError))
+	end
+end
+if resumeFindAfterTeleport then
+	spawnTask(function()
+		task.wait(CONFIG.IntroDuration + 0.35)
+		if not state.closed then
+			startFind(false)
+		end
+	end)
+end
+
+
+end -- runPartTwo
+
+runPartTwo()
